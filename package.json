@@ -1,0 +1,28 @@
+{
+  "name": "ethics-code-comparator",
+  "version": "1.1.0",
+  "description": "Offline browser app for comparing reference versions of a Code of Ethics (DE 2024 vs 2026) and updating its translations, with Excel import/export.",
+  "homepage": "https://richardlipka.github.io/ethics-code-comparator/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/richardLipka/ethics-code-comparator.git"
+  },
+  "private": true,
+  "scripts": {
+    "test": "node test/comparator.test.js && node test/gui-battery.test.js",
+    "test:unit": "node test/comparator.test.js",
+    "test:gui": "node test/gui-battery.test.js",
+    "start": "node serve.js"
+  },
+  "keywords": [],
+  "author": "Richard Lipka",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "diff": "^9.0.0",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}
