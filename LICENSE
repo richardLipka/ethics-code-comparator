@@ -19,14 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
----------------------------------------------------------------------------
-Third-party components
-
-The files in the lib/ directory are bundled, unmodified third-party libraries
-distributed under their own licenses (not the MIT license above):
-
-  lib/xlsx.full.min.js  SheetJS Community Edition 0.18.5, Apache License 2.0
-                        (see lib/LICENSE-sheetjs-xlsx.txt)
-  lib/diff.min.js       jsdiff 9.0.0, BSD 3-Clause License
-                        (see lib/LICENSE-jsdiff.txt)

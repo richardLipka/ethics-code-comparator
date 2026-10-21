@@ -181,7 +181,8 @@ Comparator/
 ├── serve.js                     # Lokální HTTP server (node serve.js)
 ├── package.json                 # Konfigurace npm projektu a testovacích skriptů
 ├── README.md                    # Podrobná dokumentace aplikace
-├── LICENSE                      # Licence MIT (+ přehled licencí knihoven v lib/)
+├── LICENSE                      # Licence MIT
+├── THIRD_PARTY_NOTICES.md       # Licence přibalených knihoven v lib/
 ├── css/
 │   └── app.css                  # Styly, sticky toolbar, matice, modály, lehký/tmavý režim
 ├── js/
@@ -209,4 +210,4 @@ Comparator/
 
 Aplikace je šířena pod licencí [MIT](LICENSE) © 2026 Richard Lipka.
 
-Přibalené knihovny ve složce `lib/` mají vlastní licence: SheetJS Community Edition (Apache 2.0, viz `lib/LICENSE-sheetjs-xlsx.txt`) a jsdiff (BSD 3-Clause, viz `lib/LICENSE-jsdiff.txt`).
+Přibalené knihovny ve složce `lib/` mají vlastní licence (viz [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)): SheetJS Community Edition (Apache 2.0, viz `lib/LICENSE-sheetjs-xlsx.txt`) a jsdiff (BSD 3-Clause, viz `lib/LICENSE-jsdiff.txt`).
