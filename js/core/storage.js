@@ -13,9 +13,12 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const STORAGE_KEY = 'ethic_comparator_workspace_v1';
-  const PROJECT_APP_ID = 'EthicCodeComparator';
-  const PROJECT_VERSION = '1.2.0';
+  const STORAGE_KEY = 'i18n_manager_workspace_v1';
+  const PROJECT_APP_ID = 'InternationalisationManager';
+  const PROJECT_VERSION = '1.3.0';
+  // Identifiers used before the project was renamed; still read so older work loads
+  const LEGACY_STORAGE_KEYS = ['ethic_comparator_workspace_v1'];
+  const LEGACY_APP_IDS = ['EthicCodeComparator'];
   let debounceTimer = null;
   let pendingSave = null; // { state, callback } of the debounced save that has not run yet
 
@@ -118,7 +121,10 @@
   function loadState() {
     if (!isLocalStorageAvailable()) return null;
     try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
+      let raw = window.localStorage.getItem(STORAGE_KEY);
+      for (let i = 0; !raw && i < LEGACY_STORAGE_KEYS.length; i++) {
+        raw = window.localStorage.getItem(LEGACY_STORAGE_KEYS[i]);
+      }
       if (!raw) return null;
       return JSON.parse(raw);
     } catch (e) {
@@ -135,7 +141,9 @@
     pendingSave = null;
     if (!isLocalStorageAvailable()) return;
     try {
-      window.localStorage.removeItem(STORAGE_KEY);
+      [STORAGE_KEY].concat(LEGACY_STORAGE_KEYS).forEach(function (key) {
+        window.localStorage.removeItem(key);
+      });
     } catch (e) {
       console.warn('Chyba při mazání LocalStorage:', e);
     }
@@ -200,7 +208,7 @@
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       fail('neplatný formát souboru projektu.');
     }
-    if (parsed.app && parsed.app !== PROJECT_APP_ID) {
+    if (parsed.app && parsed.app !== PROJECT_APP_ID && LEGACY_APP_IDS.indexOf(parsed.app) === -1) {
       fail('soubor nepatří této aplikaci (' + parsed.app + ').');
     }
     if (!Array.isArray(parsed.rows) || parsed.rows.length === 0) {

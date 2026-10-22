@@ -1,11 +1,11 @@
 {
-  "name": "ethics-code-comparator",
-  "version": "1.2.0",
-  "description": "Offline browser app that compares the old and new version of a reference text and helps update all its language versions, with Excel import/export.",
-  "homepage": "https://richardlipka.github.io/ethics-code-comparator/",
+  "name": "internationalisation-manager",
+  "version": "1.3.0",
+  "description": "Internationalisation Manager – offline browser app that compares the old and new version of a reference text and helps update all its language versions; import/export through pluggable adapters (Excel by default).",
+  "homepage": "https://richardlipka.github.io/internationalisation-manager/",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/richardLipka/ethics-code-comparator.git"
+    "url": "git+https://github.com/richardLipka/internationalisation-manager.git"
   },
   "private": true,
   "scripts": {

@@ -1,5 +1,5 @@
 /**
- * Automated Test Suite for ComparatorEngine, StorageManager, PdfExporter and I18n
+ * Automated Test Suite for ComparatorEngine, StorageManager, I18n and the import/export adapters
  * Run with: node test/comparator.test.js
  */
 
@@ -9,9 +9,33 @@ const path = require('path');
 const XLSX = require('xlsx');
 const ComparatorEngine = require('../js/core/comparator-engine');
 const StorageManager = require('../js/core/storage');
-const PdfExporter = require('../js/core/pdf-export');
 const SampleGenerator = require('../js/core/sample-generator');
 const I18n = require('../js/core/i18n');
+const Importers = require('../js/io/importers');
+const ExcelImporter = require('../js/io/excel-importer');
+const Exporters = require('../js/io/exporters');
+const ExcelExporter = require('../js/io/excel-exporter');
+const HtmlDocumentExporter = require('../js/io/html-document-exporter');
+const SummaryExporters = require('../js/io/summary-exporters');
+
+// What the application does: a format-independent model from the engine, rendered by the
+// default export adapter
+function exportWorkbook(options) {
+  const result = ComparatorEngine.prepareExportTables(options);
+  return { workbook: ExcelExporter.buildWorkbook({ tables: result.tables }), unverifiedCount: result.unverifiedCount };
+}
+
+function summaryOf(params) {
+  const model = ComparatorEngine.buildChangeSummary(params);
+  return Object.assign({}, model, {
+    markdown: SummaryExporters.renderSummaryMarkdown(model),
+    htmlDoc: SummaryExporters.renderSummaryHtml(model)
+  });
+}
+
+function documentHtml(options) {
+  return HtmlDocumentExporter.renderDocumentHtml(ComparatorEngine.buildDocumentModel(options));
+}
 
 let passCount = 0;
 let failCount = 0;
@@ -255,9 +279,9 @@ runTest('prepareExportData: vytvořený sloupec nepřepíše existující sloupe
   assert.strictEqual(res.data[0]['CS (new) (2)'], 'NOVÉ');
 });
 
-runTest('buildExportWorkbook: kompletní sešit zapsaný do .xlsx a zpět, včetně listu se stavem kontroly', () => {
+runTest('Export tabulek + Excel adaptér: kompletní sešit zapsaný do .xlsx a zpět, včetně listu se stavem kontroly', () => {
   const g = genericTable();
-  const result = ComparatorEngine.buildExportWorkbook(XLSX, {
+  const result = exportWorkbook({
     rows: g.rows, headers: g.headers, mappings: g.mappings, rowNumbers: g.rowNumbers, translations: {}, exportType: 'comprehensive', uiLang: 'cs'
   });
   const wb = XLSX.read(XLSX.write(result.workbook, { type: 'buffer', bookType: 'xlsx' }), { type: 'buffer' });
@@ -269,17 +293,17 @@ runTest('buildExportWorkbook: kompletní sešit zapsaný do .xlsx a zpět, včet
   assert.deepStrictEqual(status.map(s => s['Čeština']), ['Ověřeno', 'Čeká na kontrolu', 'Chybí překlad', 'Zrušeno v nové verzi']);
   assert.strictEqual(result.unverifiedCount, 4, 'Čeština: 1 ke kontrole + 1 chybí; polština: 2 chybí');
 
-  const en = ComparatorEngine.buildExportWorkbook(XLSX, { rows: g.rows, headers: g.headers, mappings: g.mappings, exportType: 'comprehensive', uiLang: 'en' });
+  const en = exportWorkbook({ rows: g.rows, headers: g.headers, mappings: g.mappings, exportType: 'comprehensive', uiLang: 'en' });
   assert.deepStrictEqual(en.workbook.SheetNames, ['Comparison', 'Translation_Status']);
 });
 
-runTest('buildExportWorkbook (částečný): číslo řádku, vybrané referenční sloupce, stará a nová verze jazyka a stav', () => {
+runTest('Export tabulek + Excel adaptér (částečný): číslo řádku, vybrané referenční sloupce, stará a nová verze jazyka a stav', () => {
   const g = genericTable();
   const translations = { Polish: ComparatorEngine.generateTargetStub(g.rows, 'Polish', g.mappings.refOldCol, g.mappings.refNewCol) };
   translations.Polish[1].targetNew = 'Limit to 50 EUR.';
   translations.Polish[1].isVerified = true;
 
-  const result = ComparatorEngine.buildExportWorkbook(XLSX, {
+  const result = exportWorkbook({
     rows: g.rows, headers: g.headers, mappings: g.mappings, rowNumbers: g.rowNumbers, translations,
     exportType: 'language', langCol: 'Polish', contextCols: ['Reference old', 'Reference new'], uiLang: 'cs'
   });
@@ -314,7 +338,7 @@ runTest('StorageManager: uložení a načtení projektu zachová práci, jazyky,
 
   const json = StorageManager.serializeProjectJson(state);
   const file = JSON.parse(json);
-  assert.strictEqual(file.app, 'EthicCodeComparator');
+  assert.strictEqual(file.app, 'InternationalisationManager');
   assert.strictEqual(file.translations.Czech[1].refOld, undefined, 'Kompaktní formát bez duplicitních textů');
 
   const restored = StorageManager.parseProjectJson(json);
@@ -330,6 +354,8 @@ runTest('StorageManager: uložení a načtení projektu zachová práci, jazyky,
 runTest('StorageManager: chybné soubory jsou odmítnuty, starší soubory doplněny o výchozí hodnoty', () => {
   const valid = { app: 'EthicCodeComparator', headers: ['A', 'B'], rows: [{ A: 'x', B: 'y' }], mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: [] } };
   assert.throws(() => StorageManager.parseProjectJson('{ not json'), /platný JSON/);
+  assert.ok(StorageManager.parseProjectJson(JSON.stringify({ ...valid, app: 'InternationalisationManager' })), 'Aktuální identifikátor aplikace');
+  assert.ok(StorageManager.parseProjectJson(JSON.stringify(valid)), 'Soubory pod původním názvem projektu se stále načtou');
   assert.throws(() => StorageManager.parseProjectJson(JSON.stringify({ ...valid, app: 'Jina' })), /nepatří/);
   assert.throws(() => StorageManager.parseProjectJson(JSON.stringify({ ...valid, rows: [] })), /rows/);
   assert.throws(() => StorageManager.parseProjectJson(JSON.stringify({ ...valid, mappings: { refOldCol: 'A', refNewCol: 'X' } })), /"X"/);
@@ -355,9 +381,9 @@ runTest('rehydrateStubs: změna klasifikace (jiné referenční sloupce) zruší
 });
 
 // 8. Shrnutí změn pro jeden jazyk
-runTest('generateManagerialChangeSummary: reference – statistika, Markdown a Word s čísly řádků', () => {
+runTest('Shrnutí změn: reference – statistika, Markdown a Word s čísly řádků', () => {
   const s = sample();
-  const summary = ComparatorEngine.generateManagerialChangeSummary({ rows: s.rows, mappings: s.mappings, documentName: 'Dokument', uiLang: 'cs' });
+  const summary = summaryOf({ rows: s.rows, mappings: s.mappings, documentName: 'Dokument', uiLang: 'cs' });
   assert.strictEqual(summary.isReference, true);
   assert.deepStrictEqual(summary.stats, { totalRows: 15, unchangedCount: 5, modifiedCount: 6, addedCount: 2, removedCount: 2, pctChanged: 67 });
   assert.ok(summary.markdown.includes('# Shrnutí změn – DE 2026 (Referenz) (stará → nová verze)'));
@@ -368,13 +394,13 @@ runTest('generateManagerialChangeSummary: reference – statistika, Markdown a W
   assert.ok(summary.htmlDoc.includes('xmlns:w="urn:schemas-microsoft-com:office:word"'));
 });
 
-runTest('generateManagerialChangeSummary: vybraný jazyk – jeho stará a nová verze a stav kontroly', () => {
+runTest('Shrnutí změn: vybraný jazyk – jeho stará a nová verze a stav kontroly', () => {
   const g = genericTable();
   const translations = { Polish: ComparatorEngine.generateTargetStub(g.rows, 'Polish', g.mappings.refOldCol, g.mappings.refNewCol) };
   translations.Polish[1].targetNew = 'Limit to 50 EUR.';
   translations.Polish[1].isVerified = true;
 
-  const summary = ComparatorEngine.generateManagerialChangeSummary({
+  const summary = summaryOf({
     rows: g.rows, mappings: g.mappings, translations, rowNumbers: g.rowNumbers, langCol: 'Polish', uiLang: 'cs'
   });
   assert.strictEqual(summary.language, 'Polština');
@@ -386,22 +412,22 @@ runTest('generateManagerialChangeSummary: vybraný jazyk – jeho stará a nová
   assert.ok(!summary.markdown.includes('Limit is 50 EUR.'), 'Shrnutí jazyka neobsahuje referenční text');
   assert.ok(summary.htmlDoc.includes('Stav překladu'));
 
-  const printable = PdfExporter.generateManagerialReportHtml({ rows: g.rows, mappings: g.mappings, translations, langCol: 'Polish', uiLang: 'en' });
+  const printable = SummaryExporters.renderSummaryHtml(ComparatorEngine.buildChangeSummary({ rows: g.rows, mappings: g.mappings, translations, langCol: 'Polish', uiLang: 'en' }), { printable: true });
   assert.ok(printable.includes('window.print()') && printable.includes('Change summary – Polština'));
 });
 
-runTest('generateManagerialChangeSummary: víceřádkový text zůstane celý v citaci a se zalomením ve Wordu', () => {
+runTest('Shrnutí změn: víceřádkový text zůstane celý v citaci a se zalomením ve Wordu', () => {
   const rows = [{ A: 'Zeile eins\nZeile zwei', B: 'Zeile eins\nZeile drei' }];
-  const s = ComparatorEngine.generateManagerialChangeSummary({ rows, mappings: { refOldCol: 'A', refNewCol: 'B' } });
+  const s = summaryOf({ rows, mappings: { refOldCol: 'A', refNewCol: 'B' } });
   assert.ok(s.markdown.includes('> Zeile eins\n> Zeile zwei'));
   assert.ok(s.markdown.includes('> Zeile eins\n> Zeile drei'));
   assert.ok(s.htmlDoc.includes('Zeile eins<br>Zeile zwei'));
 });
 
 // 9. Dokument pro tisk
-runTest('PdfExporter: dokument nové verze jazyka – čisté odstavce bez nadpisů, koncept při neúplném překladu', () => {
+runTest('Dokument pro tisk: dokument nové verze jazyka – čisté odstavce bez nadpisů, koncept při neúplném překladu', () => {
   const g = genericTable();
-  const html = PdfExporter.generateDocumentHtml({
+  const html = documentHtml({
     rows: g.rows, mappings: g.mappings, translations: {}, targetCol: 'Polish', documentName: 'Smlouva', uiLang: 'cs'
   });
   assert.ok(html.includes('size: A4') && html.includes('window.print()'));
@@ -414,13 +440,13 @@ runTest('PdfExporter: dokument nové verze jazyka – čisté odstavce bez nadpi
   assert.ok(!/etick|kodex|compliance|certifik/i.test(html), 'Žádný text specifický pro etický kodex');
   assert.ok(!html.includes('<div class="sign-block">'), 'Podpisy jen na vyžádání');
 
-  const ref = PdfExporter.generateDocumentHtml({ rows: g.rows, mappings: g.mappings, targetCol: 'Reference new', uiLang: 'cs' });
+  const ref = documentHtml({ rows: g.rows, mappings: g.mappings, targetCol: 'Reference new', uiLang: 'cs' });
   assert.ok(ref.includes('Brand new paragraph.') && !ref.includes('KONCEPT'));
 });
 
-runTest('PdfExporter: vlastní hlavička (organizace, podtitul s {LANG}, verze, podpisy) a escapování', () => {
+runTest('Dokument pro tisk: vlastní hlavička (organizace, podtitul s {LANG}, verze, podpisy) a escapování', () => {
   const g = genericTable();
-  const html = PdfExporter.generateDocumentHtml({
+  const html = documentHtml({
     rows: g.rows, mappings: g.mappings, targetCol: 'Polish', uiLang: 'cs',
     template: {
       companyName: 'ACME a.s.', docTitle: 'Provozní řád', docSubtitle: 'Znění – {LANG}', versionLabel: '<b>v3</b>',
@@ -430,13 +456,13 @@ runTest('PdfExporter: vlastní hlavička (organizace, podtitul s {LANG}, verze, 
   ['ACME a.s.', 'Provozní řád', 'Znění – Polština', 'Platné od 1. 1.', '#0d9488', 'Úvod.', 'Ředitel', '<div class="sign-block">']
     .forEach(part => assert.ok(html.includes(part), 'Chybí: ' + part));
   assert.ok(html.includes('&lt;b&gt;v3&lt;/b&gt;') && !html.includes('<b>v3</b>'));
-  assert.ok(!PdfExporter.generateDocumentHtml({ rows: g.rows, mappings: g.mappings, targetCol: 'Polish', template: { accentColor: 'red;}body{x' } }).includes('red;}'),
+  assert.ok(!documentHtml({ rows: g.rows, mappings: g.mappings, targetCol: 'Polish', template: { accentColor: 'red;}body{x' } }).includes('red;}'),
     'Neplatná barva se nepoužije');
 });
 
 // 10. Integrace se vzorovým souborem
 runTest('Integrace: ukázkový .xlsx – stuby a kompletní export', () => {
-  const wb = XLSX.readFile(path.join(__dirname, '../sample/vzorec_eticky_kodex_2024_2026.xlsx'));
+  const wb = XLSX.readFile(path.join(__dirname, '../sample/ukazkovy_dokument.xlsx'));
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
   assert.strictEqual(rows.length, 15);
   const s = sample();
@@ -447,7 +473,127 @@ runTest('Integrace: ukázkový .xlsx – stuby a kompletní export', () => {
   assert.strictEqual(res.data[3]['CS 2026'], 'Dary do 50 eur.', 'Výchozí název nového sloupce odvozen z čísla verze reference');
 });
 
-// 11. Lokalizace a obecnost textů
+// 11. Adaptéry pro import a export
+runTest('Importers: Excel adaptér je výchozí, přípona i MIME typ CSV se rozpoznají', () => {
+  assert.ok(Importers.list().some(a => a.id === 'excel'));
+  assert.strictEqual(Importers.findForFile('data.XLSX').id, 'excel');
+  assert.strictEqual(Importers.findForFile('export', 'text/csv').id, 'excel');
+  assert.strictEqual(Importers.findForFile('data.json'), null);
+  assert.ok(Importers.acceptAttribute().split(',').includes('.csv'));
+});
+
+runTest('Excel adaptér: list se záhlavím, bez záhlaví a CSV se převedou na model tabulky (oříznutí, čísla řádků)', () => {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['2024', 'Text', ''],
+    ['a', '  okraj  ', 'x'],
+    [],
+    ['b', 'druhý', 'y']
+  ]), 'List1');
+  const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+  const source = ExcelImporter.parse(buf, { fileName: 't.xlsx' });
+  assert.deepStrictEqual(source.sheetNames, ['List1']);
+
+  const withHeader = Importers.readSheet(source, 'List1', { hasHeaderRow: true });
+  assert.deepStrictEqual(withHeader.headers, ['2024', 'Text', '__EMPTY'], 'Pořadí sloupců podle listu, i číselný název');
+  assert.deepStrictEqual(withHeader.rowNumbers, [2, 4], 'Prázdný řádek se přeskočí, čísla řádků odpovídají Excelu');
+  assert.strictEqual(withHeader.rows[0].Text, 'okraj', 'Bílé znaky na okrajích odstraněny');
+  assert.strictEqual(withHeader.columnLetters.__EMPTY, 'C');
+
+  const noHeader = Importers.readSheet(source, 'List1', { hasHeaderRow: false });
+  assert.deepStrictEqual(noHeader.headers, ['A', 'B', 'C']);
+  assert.deepStrictEqual(noHeader.rowNumbers, [1, 2, 4]);
+
+  const csv = ExcelImporter.parse('\uFEFFR;N\nGröße;Nová\n', { fileName: 'x.csv' });
+  assert.deepStrictEqual(Importers.readSheet(csv, csv.sheetNames[0]).rows, [{ R: 'Größe', N: 'Nová' }]);
+  assert.strictEqual(ExcelImporter.readAs('x.csv'), 'text');
+  assert.strictEqual(ExcelImporter.readAs('x.xlsx'), 'arraybuffer');
+});
+
+runTest('Importers: nový adaptér lze zaregistrovat a má přednost; model tabulky se normalizuje', () => {
+  const custom = {
+    id: 'test-json',
+    label: 'JSON test',
+    extensions: ['.json', '.csv'],
+    readAs: 'text',
+    parse: function (content) {
+      const data = JSON.parse(content);
+      return { sheetNames: ['Strings'], readSheet: () => ({ rows: data.map(d => ({ key: d.key, text: '  ' + d.text + ' ' })) }) };
+    }
+  };
+  Importers.register(custom);
+  try {
+    assert.strictEqual(Importers.findForFile('strings.json').id, 'test-json');
+    assert.strictEqual(Importers.findForFile('data.csv').id, 'test-json', 'Později registrovaný adaptér má přednost');
+    const source = custom.parse('[{"key":"a","text":"Ahoj"}]');
+    const table = Importers.readSheet(source, 'Strings');
+    assert.deepStrictEqual(table, { headers: ['key', 'text'], rows: [{ key: 'a', text: 'Ahoj' }], rowNumbers: [2], columnLetters: {} });
+    assert.throws(() => Importers.register({ id: 'bad' }), /parse/);
+  } finally {
+    Importers.unregister('test-json');
+  }
+  assert.strictEqual(Importers.findForFile('data.csv').id, 'excel');
+});
+
+runTest('Exporters: výchozí adaptéry podle skupin a registrace nového formátu', () => {
+  assert.deepStrictEqual(Exporters.list('table').map(a => a.id), ['xlsx']);
+  assert.strictEqual(Exporters.getDefault('table').id, 'xlsx');
+  assert.strictEqual(Exporters.getDefault('document').id, 'html-print');
+  assert.strictEqual(Exporters.getDefault('summary').id, 'summary-markdown');
+  assert.deepStrictEqual(Exporters.list('summary').map(a => a.id), ['summary-markdown', 'summary-word', 'summary-print']);
+
+  const csvAdapter = {
+    id: 'test-csv', label: 'CSV', group: 'table',
+    export: (payload) => ({ content: payload.tables[0].headers.join(';'), mimeType: 'text/csv', extension: '.csv' })
+  };
+  Exporters.register(csvAdapter);
+  try {
+    assert.deepStrictEqual(Exporters.list('table').map(a => a.id), ['xlsx', 'test-csv']);
+    assert.strictEqual(Exporters.getDefault('table').id, 'xlsx', 'Výchozí formát zůstává');
+    const g = genericTable();
+    const tables = ComparatorEngine.prepareExportTables({ rows: g.rows, headers: g.headers, mappings: g.mappings, exportType: 'clean' }).tables;
+    assert.strictEqual(Exporters.get('test-csv').export({ tables }).content, 'Reference new;Notes;Czech new;Polish NEW');
+    assert.throws(() => Exporters.register({ id: 'bad', group: 'table' }), /export/);
+  } finally {
+    Exporters.unregister('test-csv');
+  }
+  assert.strictEqual(Exporters.safeFilePart('Dokument – změny (CS)'), 'Dokument_změny_CS');
+});
+
+runTest('Excel exportér: jeden list na tabulku, platné a unikátní názvy listů, šířky a filtr', () => {
+  const content = Exporters.get('xlsx').export({
+    tables: [
+      { name: 'Jazyk: CS/EN [nový] s velmi dlouhým názvem listu', headers: ['A', 'B'], rows: [{ A: 1, B: 'dlouhý text' }] },
+      { name: 'Jazyk: CS/EN [nový] s velmi dlouhým názvem listu', headers: ['X'], rows: [{ X: 'y' }] }
+    ]
+  });
+  assert.strictEqual(content.extension, '.xlsx');
+  const wb = XLSX.read(content.content, { type: 'array' });
+  assert.strictEqual(wb.SheetNames.length, 2);
+  assert.ok(wb.SheetNames.every(n => n.length <= 31 && !/[\\/?*[\]:]/.test(n)), JSON.stringify(wb.SheetNames));
+  assert.notStrictEqual(wb.SheetNames[0], wb.SheetNames[1]);
+  assert.deepStrictEqual(XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]), [{ A: 1, B: 'dlouhý text' }]);
+});
+
+runTest('Modely dokumentu a shrnutí neobsahují formátování – vykreslí je až adaptér', () => {
+  const g = genericTable();
+  const model = ComparatorEngine.buildDocumentModel({ rows: g.rows, mappings: g.mappings, rowNumbers: g.rowNumbers, targetCol: 'Polish', documentName: 'Smlouva' });
+  assert.deepStrictEqual(model.paragraphs.map(p => [p.rowNumber, p.missing]), [[2, false], [3, true], [5, true]]);
+  assert.strictEqual(model.title, 'Smlouva');
+  assert.strictEqual(model.isDraft, true);
+  assert.ok(!JSON.stringify(model).includes('<'), 'Model dokumentu je bez HTML');
+
+  const summary = ComparatorEngine.buildChangeSummary({ rows: g.rows, mappings: g.mappings, rowNumbers: g.rowNumbers });
+  assert.strictEqual(summary.markdown, undefined);
+  assert.deepStrictEqual(summary.stats, { totalRows: 4, unchangedCount: 1, modifiedCount: 1, addedCount: 1, removedCount: 1, pctChanged: 75 });
+  const md = Exporters.get('summary-markdown').export(summary);
+  assert.strictEqual(md.extension, '.md');
+  const word = Exporters.get('summary-word').export(summary);
+  assert.ok(word.content.startsWith('\ufeff<!DOCTYPE html>') && word.extension === '.doc');
+  assert.strictEqual(Exporters.get('html-file').export(model).extension, '.html');
+});
+
+// 12. Lokalizace a obecnost textů
 runTest('i18n: všechny klíče z app.js a index.html existují v CS i EN; texty jsou obecné', () => {
   const appSrc = fs.readFileSync(path.join(__dirname, '../js/app.js'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');

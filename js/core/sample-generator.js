@@ -1,5 +1,5 @@
 /**
- * Sample Generator - Creates realistic multi-language Code of Ethics dataset.
+ * Sample Generator - Creates a realistic multi-language sample document (here a code of conduct).
  * Supports German (2024 & 2026) + 10 target languages (EN, CS, FR, ES, IT, PL, NL, SK, HU, RO).
  * Universal module: works in Node.js and browser.
  */

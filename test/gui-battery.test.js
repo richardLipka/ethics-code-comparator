@@ -52,6 +52,23 @@ function readBlobText(window, blob) {
   });
 }
 
+function readBlobBuffer(window, blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new window.FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsArrayBuffer(blob);
+  });
+}
+
+// The last downloaded file parsed as a workbook: { name, wb }
+async function lastWorkbook(window) {
+  const download = window.__downloads.pop();
+  assert.ok(download && /\.xlsx$/.test(download.name), 'Stáhne se sešit .xlsx: ' + (download && download.name));
+  const buffer = await readBlobBuffer(window, download.blob);
+  return { name: download.name, wb: window.XLSX.read(new Uint8Array(buffer), { type: 'array' }) };
+}
+
 function toastTexts(document) {
   return Array.from(document.querySelectorAll('#toastContainer .toast')).map(t => t.textContent);
 }
@@ -78,14 +95,9 @@ console.log('=== Spouštím baterii GUI testů pro Comparator ===\n');
 const htmlPath = path.join(__dirname, '..', 'index.html');
 const htmlSource = fs.readFileSync(htmlPath, 'utf8');
 
-const diffJs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'diff.min.js'), 'utf8');
-const xlsxJs = fs.readFileSync(path.join(__dirname, '..', 'lib', 'xlsx.full.min.js'), 'utf8');
-const i18nJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'core', 'i18n.js'), 'utf8');
-const engineJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'core', 'comparator-engine.js'), 'utf8');
-const sampleJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'core', 'sample-generator.js'), 'utf8');
-const storageJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'core', 'storage.js'), 'utf8');
-const pdfJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'core', 'pdf-export.js'), 'utf8');
-const appJs = fs.readFileSync(path.join(__dirname, '..', 'js', 'app.js'), 'utf8');
+const scriptSources = [...htmlSource.matchAll(/<script src="([^"]+)"><\/script>/g)]
+  .map(m => fs.readFileSync(path.join(__dirname, '..', m[1]), 'utf8'));
+const STORAGE_KEY = 'i18n_manager_workspace_v1';
 
 function createDomEnvironment(options) {
   const opts = options || {};
@@ -153,18 +165,11 @@ function createDomEnvironment(options) {
   if (opts.beforeInit) opts.beforeInit(window);
 
   // Spuštění skriptů v pořadí z index.html
-  window.eval(diffJs);
-  window.eval(xlsxJs);
-  window.eval(i18nJs);
-  window.eval(engineJs);
-  window.eval(sampleJs);
-  window.eval(storageJs);
-  window.eval(pdfJs);
-  // Capture generated Excel workbooks (XLSX.writeFile would write to disk)
-  window.__workbooks = [];
-  window.XLSX.writeFile = (wb, name) => { window.__workbooks.push({ wb, name }); };
-
-  window.eval(appJs);
+  // Scripts in index.html order; opts.beforeApp may register extra adapters before the app starts
+  scriptSources.forEach((src, i) => {
+    if (i === scriptSources.length - 1 && opts.beforeApp) opts.beforeApp(window);
+    window.eval(src);
+  });
 
   // Inicializace aplikace (DOMContentLoaded)
   window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
@@ -201,7 +206,7 @@ runTest('GUI Boot: výchozí zobrazení, obecné texty a přepínání jazyků C
 
   assert.strictEqual(document.documentElement.getAttribute('lang'), 'cs');
   assert.ok(document.getElementById('stepNav1').classList.contains('active'));
-  assert.strictEqual(document.querySelector('.brand-title').textContent, 'Srovnávač verzí & Překladový asistent');
+  assert.strictEqual(document.querySelector('.brand-title').textContent, 'Internationalisation Manager');
   assert.ok(!/etick|kodex|němčin|2024|2026/i.test(document.body.textContent), 'Rozhraní nepředpokládá etický kodex, němčinu ani roky');
 
   const langBtn = document.getElementById('langToggleBtn');
@@ -209,7 +214,7 @@ runTest('GUI Boot: výchozí zobrazení, obecné texty a přepínání jazyků C
   langBtn.click();
   assert.strictEqual(document.documentElement.getAttribute('lang'), 'en');
   assert.strictEqual(langBtn.textContent.trim(), '🇨🇿 Čeština');
-  assert.strictEqual(document.querySelector('[data-i18n="dropzoneTitle"]').textContent.trim(), 'Drag & drop a file (.xlsx, .xls, .csv) here or click to browse');
+  assert.strictEqual(document.querySelector('[data-i18n="dropzoneTitle"]').textContent.trim(), 'Drag & drop a file (Excel, OpenDocument or CSV) here or click to browse');
   assert.strictEqual(document.getElementById('saveProjectBtn').textContent, '💾 Save project');
   langBtn.click();
   assert.strictEqual(document.getElementById('loadProjectBtn').textContent, '📂 Načíst projekt');
@@ -450,7 +455,7 @@ runTest('Dokument pro tisk: vybraný jazyk, upravený text, koncept, žádné na
 });
 
 // Excel exporty
-runTest('Excel: kompletní a nová verze tlačítky v Kroku 4', () => {
+runTest('Excel: kompletní a nová verze tlačítky v Kroku 4', async () => {
   const { window, document } = createDomEnvironment();
   const XLSX = window.XLSX;
   openCzechStudio(window);
@@ -462,7 +467,7 @@ runTest('Excel: kompletní a nová verze tlačítky v Kroku 4', () => {
   document.getElementById('goToExportBtn').click();
 
   document.getElementById('downloadComprehensiveBtn').click();
-  const comp = window.__workbooks.pop();
+  const comp = await lastWorkbook(window);
   assert.strictEqual(comp.name, 'ukazkovy_dokument_srovnani.xlsx');
   assert.deepStrictEqual(plain(comp.wb.SheetNames), ['Srovnani', 'Stav_prekladu']);
   const header = XLSX.utils.sheet_to_json(comp.wb.Sheets.Srovnani, { header: 1 })[0];
@@ -476,14 +481,14 @@ runTest('Excel: kompletní a nová verze tlačítky v Kroku 4', () => {
   assert.ok(toastTexts(document).some(t => /Pozor: \d+ odstavců/.test(t)));
 
   document.getElementById('downloadCleanBtn').click();
-  const clean = window.__workbooks.pop();
+  const clean = await lastWorkbook(window);
   assert.strictEqual(clean.name, 'ukazkovy_dokument_nova_verze.xlsx');
   const cleanRows = XLSX.utils.sheet_to_json(clean.wb.Sheets[clean.wb.SheetNames[0]], { defval: '' });
   assert.strictEqual(cleanRows.length, 13);
   assert.ok(!('CS 2024' in cleanRows[0]) && cleanRows.some(r => r['CS 2026'] === 'Dary do 50 EUR.'));
 });
 
-runTest('Excel: částečný sešit pro vybraný jazyk s volitelnými referenčními sloupci', () => {
+runTest('Excel: částečný sešit pro vybraný jazyk s volitelnými referenčními sloupci', async () => {
   const { window, document } = createDomEnvironment();
   const XLSX = window.XLSX;
   openCzechStudio(window);
@@ -504,7 +509,7 @@ runTest('Excel: částečný sešit pro vybraný jazyk s volitelnými referenčn
   refOld.dispatchEvent(new window.Event('change'));
 
   document.getElementById('downloadPartialBtn').click();
-  const out = window.__workbooks.pop();
+  const out = await lastWorkbook(window);
   assert.strictEqual(out.name, 'ukazkovy_dokument_CS.xlsx');
   const sheet = out.wb.Sheets[out.wb.SheetNames[0]];
   assert.deepStrictEqual(plain(XLSX.utils.sheet_to_json(sheet, { header: 1 })[0]), ['Řádek', 'DE 2026 (Referenz)', 'EN 2024', 'CS 2024', 'CS 2026', 'Stav']);
@@ -660,13 +665,98 @@ runTest('Autosave: uložení do prohlížeče a obnovení po znovuotevření', a
   assert.strictEqual(env1.document.getElementById('saveStatusText').textContent, 'Ukládám...');
   env1.window.dispatchEvent(new env1.window.Event('pagehide'));
   assert.strictEqual(env1.document.getElementById('saveStatusText').textContent, 'Vše uloženo');
-  const stored = env1.window.localStorage.getItem('ethic_comparator_workspace_v1');
+  const stored = env1.window.localStorage.getItem(STORAGE_KEY);
   assert.ok(stored.includes('Automaticky uložený text'));
 
-  const env2 = createDomEnvironment({ acceptResume: true, beforeInit: (w) => w.localStorage.setItem('ethic_comparator_workspace_v1', stored) });
+  const env2 = createDomEnvironment({ acceptResume: true, beforeInit: (w) => w.localStorage.setItem(STORAGE_KEY, stored) });
   await sleep(150);
   assert.strictEqual(env2.document.getElementById('step3Section').style.display, 'block');
   assert.strictEqual(env2.document.getElementById('article-card-3').querySelector('textarea').value, 'Automaticky uložený text');
+});
+
+runTest('Autosave pod původním názvem projektu se stále nabídne k obnovení', async () => {
+  const env1 = createDomEnvironment();
+  openCzechStudio(env1.window);
+  typeInto(env1.window, env1.document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Starší autosave');
+  env1.window.dispatchEvent(new env1.window.Event('pagehide'));
+  const stored = env1.window.localStorage.getItem(STORAGE_KEY);
+
+  const env2 = createDomEnvironment({ acceptResume: true, beforeInit: (w) => w.localStorage.setItem('ethic_comparator_workspace_v1', stored) });
+  await sleep(150);
+  assert.strictEqual(env2.document.getElementById('article-card-3').querySelector('textarea').value, 'Starší autosave');
+});
+
+runTest('Adaptéry: nový importér a exportér se použijí bez úprav aplikace', async () => {
+  const { window, document } = createDomEnvironment({
+    beforeApp: (w) => {
+      // Simple key = text importer for .tsv files (one language per column)
+      w.Importers.register({
+        id: 'test-tsv',
+        label: 'TSV',
+        extensions: ['.tsv'],
+        readAs: 'text',
+        parse: (content) => {
+          const lines = content.trim().split('\n').map(l => l.split('\t'));
+          return {
+            sheetNames: ['TSV'],
+            readSheet: () => ({
+              headers: lines[0],
+              rows: lines.slice(1).map(cells => Object.fromEntries(lines[0].map((h, i) => [h, cells[i] || '']))),
+              rowNumbers: lines.slice(1).map((l, i) => i + 2)
+            })
+          };
+        }
+      });
+      // CSV table exporter (first table only)
+      w.Exporters.register({
+        id: 'test-csv',
+        label: 'CSV (test)',
+        group: 'table',
+        export: (payload) => ({
+          content: [payload.tables[0].headers.join(';')].concat(payload.tables[0].rows.map(r => payload.tables[0].headers.map(h => r[h]).join(';'))).join('\n'),
+          mimeType: 'text/csv',
+          extension: '.csv'
+        })
+      });
+    }
+  });
+
+  document.getElementById('dropzone').dispatchEvent(new window.MouseEvent('click'));
+  assert.ok(document.getElementById('fileInput').getAttribute('accept').split(',').includes('.tsv'), 'Výběr souboru nabízí formát nového importéru');
+
+  const tsv = 'EN old\tEN new\tCZ\nThe first paragraph text.\tThe first paragraph text, updated.\tText prvního odstavce.\n';
+  window.__app.processUploadedFile(new window.File([tsv], 'texty.tsv'));
+  await sleep(100);
+  assert.strictEqual(window.__lastAlert, undefined, String(window.__lastAlert));
+  assert.deepStrictEqual(plain(window.__app.state.headers), ['EN old', 'EN new', 'CZ']);
+
+  const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.onchange(); };
+  set('refOldSelect', 'EN old');
+  set('refNewSelect', 'EN new');
+  document.getElementById('confirmMappingBtn').click();
+  document.getElementById('goToTranslationBtn').click();
+  document.getElementById('goToExportBtn').click();
+
+  const wrapper = document.getElementById('tableFormatWrapper');
+  const select = document.getElementById('tableFormatSelect');
+  assert.notStrictEqual(wrapper.style.display, 'none', 'S více tabulkovými formáty se zobrazí výběr formátu');
+  assert.deepStrictEqual(Array.from(select.options).map(o => o.value), ['xlsx', 'test-csv']);
+  assert.strictEqual(select.value, 'xlsx', 'Výchozí formát je Excel');
+
+  select.value = 'test-csv';
+  select.dispatchEvent(new window.Event('change'));
+  document.getElementById('downloadCleanBtn').click();
+  const download = window.__downloads.pop();
+  assert.strictEqual(download.name, 'texty_nova_verze.csv');
+  const text = await readBlobText(window, download.blob);
+  assert.ok(text.startsWith('EN new;'), text);
+});
+
+runTest('Adaptéry: nepodporovaný soubor dá srozumitelnou chybu se seznamem formátů', async () => {
+  const { window } = createDomEnvironment();
+  window.__app.processUploadedFile(new window.File(['{}'], 'data.json'));
+  await sleep(50);
+  assert.ok(/data\.json.*\.xlsx.*\.csv/.test(window.__lastAlert), String(window.__lastAlert));
 });
 
 runTest('Autosave: selhání ukládání je viditelně oznámeno', () => {
@@ -676,7 +766,7 @@ runTest('Autosave: selhání ukládání je viditelně oznámeno', () => {
   const original = proto.setItem;
   const originalWarn = window.console.warn;
   proto.setItem = function (key, value) {
-    if (key === 'ethic_comparator_workspace_v1') throw new Error('QuotaExceededError');
+    if (key === STORAGE_KEY) throw new Error('QuotaExceededError');
     return original.call(this, key, value);
   };
   window.console.warn = () => {};
@@ -694,7 +784,7 @@ runTest('Autosave: selhání ukládání je viditelně oznámeno', () => {
 // Nahrání souborů
 runTest('Nahrání .xlsx: žádné hádání jazyků podle názvů – reference vybírá uživatel, jazyky jsou textové sloupce', async () => {
   const { window, document } = createDomEnvironment();
-  const bytes = fs.readFileSync(path.join(__dirname, '..', 'sample', 'vzorec_eticky_kodex_2024_2026.xlsx'));
+  const bytes = fs.readFileSync(path.join(__dirname, '..', 'sample', 'ukazkovy_dokument.xlsx'));
   window.__app.processUploadedFile(new window.File([bytes], 'data.xlsx'));
   await sleep(100);
   const st = window.__app.state;
@@ -742,7 +832,7 @@ runTest('Nahrání .xlsx s existujícím (téměř prázdným) sloupcem nové ve
 
   document.getElementById('goToExportBtn').click();
   document.getElementById('downloadComprehensiveBtn').click();
-  const sheet = window.__workbooks.pop().wb.Sheets.Srovnani;
+  const sheet = (await lastWorkbook(window)).wb.Sheets.Srovnani;
   assert.deepStrictEqual(plain(window.XLSX.utils.sheet_to_json(sheet, { header: 1 })[0]), ['EN old', 'EN new', 'CZ old', 'CZ new', 'Poznámka'], 'Žádný nový sloupec');
   const rows = window.XLSX.utils.sheet_to_json(sheet, { defval: '' });
   assert.strictEqual(rows[0]['CZ new'], 'Stejný text odstavce.', 'Prázdná buňka doplněna');

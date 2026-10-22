@@ -9,7 +9,7 @@
   // Application State
   const state = {
     currentStep: 1, // 1: Upload & Map, 2: Ref Overview, 3: Translation Studio, 4: Export
-    workbook: null,
+    importSource: null, // source returned by the import adapter (see js/io/importers.js)
     fileName: '',
     sheetNames: [],
     activeSheet: '',
@@ -25,6 +25,7 @@
     },
     exportLangCol: '',
     partialContextCols: null,
+    tableExportFormat: '', // id of the table export adapter ('' = default)
     // Translations map: { [targetCol]: [ { rowIndex, targetNew, status, isVerified, notes } ] }
     translations: {},
     activeTargetCol: '',
@@ -118,6 +119,8 @@
     downloadComprehensiveBtn: document.getElementById('downloadComprehensiveBtn'),
     downloadCleanBtn: document.getElementById('downloadCleanBtn'),
     downloadPartialBtn: document.getElementById('downloadPartialBtn'),
+    tableFormatWrapper: document.getElementById('tableFormatWrapper'),
+    tableFormatSelect: document.getElementById('tableFormatSelect'),
     partialContextContainer: document.getElementById('partialContextContainer'),
     exportProjectJsonBtn: document.getElementById('exportProjectJsonBtn'),
     pdfLangSelect: document.getElementById('pdfLangSelect'),
@@ -409,6 +412,7 @@
     } else if (stepNumber === 4) {
       ensureStubsInitialized();
       updatePdfLanguageDropdown();
+      renderTableFormatOptions();
     }
 
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -418,7 +422,11 @@
    * Handle File Upload & Sheet Reading
    */
   function initFileUpload() {
+    elements.fileInput.setAttribute('accept', Importers.acceptAttribute());
+
     elements.dropzone.addEventListener('click', function () {
+      // Formats of all import adapters registered so far (adapters may be added later)
+      elements.fileInput.setAttribute('accept', Importers.acceptAttribute());
       elements.fileInput.click();
     });
 
@@ -453,7 +461,7 @@
 
     // Re-read the sheet when the user says the first row is (not) a header
     elements.hasHeaderRowCheckbox.addEventListener('change', function () {
-      if (state.workbook && state.activeSheet) {
+      if (state.importSource && state.activeSheet) {
         loadSheet(state.activeSheet);
       }
     });
@@ -528,112 +536,57 @@
     }
   }
 
+  /**
+   * Imports a file with the matching import adapter (see js/io/importers.js).
+   */
   function processUploadedFile(file) {
-    const reader = new FileReader();
-    // CSV is decoded as UTF-8 text; reading it as bytes would garble diacritics
-    const isCsv = /\.csv$/i.test(file.name) || file.type === 'text/csv';
+    return Importers.importFile(file).then(function (result) {
+      state.fileName = file.name;
+      state.importSource = result.source;
+      state.sheetNames = result.source.sheetNames.slice();
 
-    reader.onload = function (e) {
-      try {
-        const workbook = isCsv
-          ? XLSX.read(String(e.target.result).replace(/^﻿/, ''), { type: 'string' })
-          : XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      // Setup sheet select dropdown
+      elements.sheetSelect.innerHTML = '';
+      state.sheetNames.forEach(function (sheetName) {
+        const opt = document.createElement('option');
+        opt.value = sheetName;
+        opt.textContent = sheetName;
+        elements.sheetSelect.appendChild(opt);
+      });
 
-        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
-          alert(t('alertNoSheets'));
-          return;
-        }
-
-        state.fileName = file.name;
-        state.workbook = workbook;
-        state.sheetNames = workbook.SheetNames;
-
-        // Setup sheet select dropdown
-        elements.sheetSelect.innerHTML = '';
-        state.sheetNames.forEach(function (sheetName) {
-          const opt = document.createElement('option');
-          opt.value = sheetName;
-          opt.textContent = sheetName;
-          elements.sheetSelect.appendChild(opt);
-        });
-
-        elements.sheetOptionsWrapper.style.display = 'flex';
-        elements.sheetSelectWrapper.style.display = state.sheetNames.length > 1 ? 'block' : 'none';
-        if (loadSheet(state.sheetNames[0])) {
-          showToast(t('toastFileLoaded', { NAME: file.name }), 'success');
-        }
-      } catch (err) {
-        console.error('Chyba při parsování Excel souboru:', err);
-        alert(t('alertFileReadError', { MSG: err.message }));
+      elements.sheetOptionsWrapper.style.display = 'flex';
+      elements.sheetSelectWrapper.style.display = state.sheetNames.length > 1 ? 'block' : 'none';
+      if (loadSheet(state.sheetNames[0])) {
+        showToast(t('toastFileLoaded', { NAME: file.name }), 'success');
       }
-    };
-    reader.onerror = function () {
-      alert(t('alertFileReadError', { MSG: reader.error ? reader.error.message : file.name }));
-    };
-
-    if (isCsv) {
-      reader.readAsText(file, 'UTF-8');
-    } else {
-      reader.readAsArrayBuffer(file);
-    }
-  }
-
-  // Cells often carry stray spaces or line breaks around the text (a cell may even look empty
-  // in a narrow preview), so text is trimmed on import
-  function trimCell(value) {
-    return typeof value === 'string' ? value.trim() : (value === undefined || value === null ? '' : value);
+    }).catch(function (err) {
+      console.error('Import failed:', err);
+      if (err && err.code === 'UNSUPPORTED') {
+        alert(t('alertUnsupportedFile', { NAME: file.name, FORMATS: Importers.acceptAttribute().split(',').join(', ') }));
+      } else if (err && err.code === 'NO_SHEETS') {
+        alert(t('alertNoSheets'));
+      } else {
+        alert(t('alertFileReadError', { MSG: err && err.message ? err.message : file.name }));
+      }
+    });
   }
 
   function loadSheet(sheetName) {
-    const sheet = state.workbook.Sheets[sheetName];
     const hasHeader = elements.hasHeaderRowCheckbox.checked;
-    const range = sheet && sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null;
-    const rawRows = range
-      ? XLSX.utils.sheet_to_json(sheet, hasHeader ? { defval: '' } : { header: 'A', defval: '' })
-      : [];
+    const table = Importers.readSheet(state.importSource, sheetName, { hasHeaderRow: hasHeader });
 
-    if (!rawRows || rawRows.length === 0) {
+    if (!table) {
       alert(t('alertEmptySheet'));
       return false;
-    }
-
-    const letters = [];
-    for (let c = range.s.c; c <= range.e.c; c++) letters.push(XLSX.utils.encode_col(c));
-
-    let headers;
-    const columnLetters = {};
-    if (hasHeader) {
-      // Header order of the sheet itself (Object.keys would move numeric headers first)
-      const headerRow = XLSX.utils.sheet_to_json(sheet, { header: 1, range: range.s.r, defval: '' })[0] || [];
-      const keys = Object.keys(rawRows[0]);
-      const ordered = [];
-      headerRow.forEach(function (h, i) {
-        const key = keys.find(function (k) { return k === String(h); }) ||
-          keys.find(function (k) { return /^__EMPTY/.test(k) && ordered.indexOf(k) === -1; });
-        if (key !== undefined && ordered.indexOf(key) === -1) {
-          ordered.push(key);
-          columnLetters[key] = letters[i];
-        }
-      });
-      headers = ordered.length === keys.length ? ordered : keys;
-    } else {
-      headers = letters;
-      letters.forEach(function (l) { columnLetters[l] = l; });
     }
 
     state.activeSheet = sheetName;
     state.hasHeaderRow = hasHeader;
     elements.sheetSelect.value = sheetName;
-    state.headers = headers;
-    state.columnLetters = columnLetters;
-    state.rowNumbers = rawRows.map(function (r, i) {
-      return typeof r.__rowNum__ === 'number' ? r.__rowNum__ + 1 : i + (hasHeader ? 2 : 1);
-    });
-    state.rows = rawRows.map(function (r) {
-      const row = {};
-      headers.forEach(function (h) { row[h] = trimCell(r[h]); });
-      return row;
-    });
+    state.headers = table.headers;
+    state.columnLetters = table.columnLetters;
+    state.rowNumbers = table.rowNumbers;
+    state.rows = table.rows;
     resetWorkspaceForNewTable();
     selectDefaultLanguageColumns();
 
@@ -653,7 +606,7 @@
 
   function loadSampleDemo() {
     state.fileName = 'ukazkovy_dokument.xlsx';
-    state.workbook = null;
+    state.importSource = null;
     state.hasHeaderRow = true;
     state.rows = SampleGenerator.getSampleData();
     state.headers = SampleGenerator.getSampleHeaders();
@@ -731,22 +684,10 @@
   }
 
   function downloadSampleExcelFile() {
-    const data = SampleGenerator.getSampleData();
-    const headers = SampleGenerator.getSampleHeaders();
-    const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
-
-    worksheet['!cols'] = headers.map(function (h) {
-      let maxLen = h.length;
-      data.forEach(function (r) {
-        const val = r[h] ? String(r[h]) : '';
-        if (val.length > maxLen) maxLen = Math.min(val.length, 60);
-      });
-      return { wch: Math.max(maxLen + 3, 14) };
-    });
-
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, worksheet, 'Data');
-    XLSX.writeFile(wb, 'ukazkovy_dokument.xlsx');
+    const exporter = Exporters.getDefault('table');
+    Exporters.run(exporter.id, {
+      tables: [{ name: 'Data', headers: SampleGenerator.getSampleHeaders(), rows: SampleGenerator.getSampleData() }]
+    }, { baseName: 'ukazkovy_dokument', uiLang: I18n.getLanguage() });
     showToast(t('toastSampleDownloaded'), 'success');
   }
 
@@ -1691,7 +1632,7 @@
     const col = langCol || state.mappings.refNewCol;
     if (col !== state.mappings.refNewCol) ensureStubsInitialized();
 
-    const options = {
+    const summary = ComparatorEngine.buildChangeSummary({
       rows: state.rows,
       mappings: state.mappings,
       translations: state.translations,
@@ -1699,21 +1640,20 @@
       langCol: col,
       documentName: documentBaseName(),
       uiLang: I18n.getLanguage()
-    };
+    });
+    const adapterId = { markdown: 'summary-markdown', word: 'summary-word', pdf: 'summary-print' }[format] || format;
+    const baseName = documentBaseName() + '_zmeny_' + summary.language;
+    Exporters.run(adapterId, summary, { baseName: baseName, uiLang: I18n.getLanguage() });
 
     if (format === 'markdown') {
-      PdfExporter.downloadManagerialMarkdown(options);
       showToast(t('mgrExportMdSuccess'), 'success');
     } else if (format === 'word') {
-      PdfExporter.downloadManagerialWordDoc(options);
       showToast(t('mgrExportDocSuccess'), 'success');
-    } else if (format === 'pdf') {
-      PdfExporter.printManagerialReport(options);
     }
   }
 
-  function documentOptions(col) {
-    return {
+  function exportDocument(adapterId, col) {
+    const model = ComparatorEngine.buildDocumentModel({
       rows: state.rows,
       mappings: state.mappings,
       translations: state.translations,
@@ -1722,25 +1662,30 @@
       documentName: documentBaseName(),
       uiLang: I18n.getLanguage(),
       template: state.pdfTemplate
-    };
+    });
+    return Exporters.run(adapterId, model, { baseName: documentBaseName() + '_' + model.language, uiLang: I18n.getLanguage() });
   }
 
   function initExports() {
     elements.downloadComprehensiveBtn.addEventListener('click', function () {
-      downloadExcelWorkbook('comprehensive');
+      exportTables('comprehensive');
     });
 
     elements.downloadCleanBtn.addEventListener('click', function () {
-      downloadExcelWorkbook('clean');
+      exportTables('clean');
     });
 
     elements.downloadPartialBtn.addEventListener('click', function () {
       const col = selectedExportLang();
-      if (col) downloadExcelWorkbook('language', col);
+      if (col) exportTables('language', col);
     });
 
     elements.exportProjectJsonBtn.addEventListener('click', function () {
       exportProjectFile();
+    });
+
+    elements.tableFormatSelect.addEventListener('change', function () {
+      state.tableExportFormat = elements.tableFormatSelect.value;
     });
 
     elements.pdfLangSelect.addEventListener('change', function () {
@@ -1769,13 +1714,13 @@
     // Printable document of the selected language
     elements.printPdfBtn.addEventListener('click', function () {
       const col = selectedExportLang();
-      if (col) PdfExporter.printLanguageMutation(documentOptions(col));
+      if (col) exportDocument('html-print', col);
     });
 
     elements.downloadPdfHtmlBtn.addEventListener('click', function () {
       const col = selectedExportLang();
       if (!col) return;
-      PdfExporter.downloadPrintableHtml(documentOptions(col));
+      exportDocument('html-file', col);
       showToast(t('toastPdfHtmlDownloaded'), 'success');
     });
 
@@ -1793,7 +1738,7 @@
       if (confirm(t('confirmPrintAll', { COUNT: allCols.length }))) {
         allCols.forEach(function (col, i) {
           setTimeout(function () {
-            PdfExporter.printLanguageMutation(documentOptions(col));
+            exportDocument('html-print', col);
           }, i * 400);
         });
       }
@@ -2040,7 +1985,11 @@
     elements.pdfTemplateModal.classList.add('open');
   }
 
-  function downloadExcelWorkbook(exportType, langCol) {
+  /**
+   * Table exports (full, new version only, one language) through the selected table exporter
+   * (default: Excel, see js/io/excel-exporter.js).
+   */
+  function exportTables(exportType, langCol) {
     if (!state.rows || state.rows.length === 0) {
       showToast(t('toastNoData'), 'warning');
       return null;
@@ -2052,7 +2001,7 @@
     }
     ensureStubsInitialized();
 
-    const result = ComparatorEngine.buildExportWorkbook(XLSX, {
+    const result = ComparatorEngine.prepareExportTables({
       rows: state.rows,
       headers: state.headers,
       rowNumbers: state.rowNumbers,
@@ -2064,19 +2013,40 @@
       uiLang: I18n.getLanguage()
     });
 
-    const safe = function (text) { return String(text).replace(/[\\/:*?"<>|]+/g, '_'); };
     const suffix = exportType === 'clean' ? 'nova_verze'
-      : (exportType === 'language' ? safe(langCol === state.mappings.refNewCol ? columnDisplayName(langCol) : languageLabel(langCol)) : 'srovnani');
-    const outputFileName = `${safe(documentBaseName())}_${suffix}.xlsx`;
+      : (exportType === 'language' ? (langCol === state.mappings.refNewCol ? columnDisplayName(langCol) : languageLabel(langCol)) : 'srovnani');
+    const adapter = Exporters.get(state.tableExportFormat) || Exporters.getDefault('table');
+    const outcome = Exporters.run(adapter.id, { tables: result.tables }, {
+      baseName: documentBaseName() + '_' + suffix,
+      uiLang: I18n.getLanguage()
+    });
 
-    XLSX.writeFile(result.workbook, outputFileName);
-    showToast(t('toastWorkbookGenerated', { NAME: outputFileName }), 'success');
+    if (outcome.fileName) showToast(t('toastWorkbookGenerated', { NAME: outcome.fileName }), 'success');
     if (result.unverifiedCount > 0) {
       const key = exportType === 'clean' ? 'toastExportUnverifiedClean'
         : (exportType === 'language' ? 'toastExportUnverifiedLanguage' : 'toastExportUnverified');
       showToast(t(key, { COUNT: result.unverifiedCount }), 'warning');
     }
-    return outputFileName;
+    return outcome.fileName || null;
+  }
+
+  /**
+   * Format selector for table exports; shown only when more than one table exporter is registered.
+   */
+  function renderTableFormatOptions() {
+    const select = elements.tableFormatSelect;
+    if (!select) return;
+    const adapters = Exporters.list('table');
+    if (!Exporters.get(state.tableExportFormat)) state.tableExportFormat = Exporters.getDefault('table').id;
+    select.innerHTML = '';
+    adapters.forEach(function (a) {
+      const opt = document.createElement('option');
+      opt.value = a.id;
+      opt.textContent = a.label;
+      select.appendChild(opt);
+    });
+    select.value = state.tableExportFormat;
+    elements.tableFormatWrapper.style.display = adapters.length > 1 ? 'flex' : 'none';
   }
 
   function exportProjectFile() {
@@ -2245,7 +2215,7 @@
 
   function restoreProjectFromData(data) {
     resetWorkspaceForNewTable();
-    state.workbook = null;
+    state.importSource = null;
     state.fileName = data.fileName || '';
     state.activeSheet = data.activeSheet || '';
     state.sheetNames = state.activeSheet ? [state.activeSheet] : [];
@@ -2442,7 +2412,8 @@
         openBatchPromptModal: openBatchPromptModal,
         openPdfTemplateModal: openPdfTemplateModal,
         exportManagerialSummary: exportManagerialSummary,
-        downloadExcelWorkbook: downloadExcelWorkbook,
+        exportTables: exportTables,
+        renderTableFormatOptions: renderTableFormatOptions,
         exportProjectFile: exportProjectFile,
         loadProjectFile: loadProjectFile,
         processUploadedFile: processUploadedFile,

@@ -741,30 +741,16 @@
     };
   }
 
-  function buildSheet(XLSX, sheetData) {
-    const ws = XLSX.utils.json_to_sheet(sheetData.data, { header: sheetData.headers });
-    ws['!cols'] = sheetData.headers.map(function (h) {
-      let maxLen = String(h).length;
-      sheetData.data.forEach(function (r) {
-        const len = r[h] !== undefined && r[h] !== null ? String(r[h]).length : 0;
-        if (len > maxLen) maxLen = len;
-      });
-      return { wch: Math.min(Math.max(maxLen + 3, 10), 63) };
-    });
-    if (ws['!ref']) ws['!autofilter'] = { ref: ws['!ref'] };
-    return ws;
-  }
-
   /**
-   * Builds the export workbook with SheetJS (passed in so this works in Node and the browser).
-   * exportType: 'comprehensive' (+ status sheet), 'clean', or 'language' (partial, one language).
+   * Format-independent export of the work as tables (rendered by a 'table' export adapter).
+   * exportType: 'comprehensive' (+ status table), 'clean', or 'language' (partial, one language).
+   * Returns { tables: [{ name, headers, rows }], unverifiedCount, exportData }.
    */
-  function buildExportWorkbook(XLSX, options) {
+  function prepareExportTables(options) {
     const exportData = options.exportType === 'language'
       ? prepareLanguageExportData(options)
       : prepareExportData(options);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, buildSheet(XLSX, exportData), exportData.sheetName);
+    const tables = [{ name: exportData.sheetName, headers: exportData.headers, rows: exportData.data }];
 
     let unverifiedCount = 0;
     Object.keys(exportData.stubsByCol).forEach(function (col) {
@@ -776,10 +762,10 @@
 
     if (exportData.newColNames) {
       const statusData = prepareStatusSheetData(options, exportData);
-      XLSX.utils.book_append_sheet(workbook, buildSheet(XLSX, statusData), statusData.sheetName);
+      tables.push({ name: statusData.sheetName, headers: statusData.headers, rows: statusData.data });
     }
 
-    return { workbook: workbook, exportData: exportData, unverifiedCount: unverifiedCount };
+    return { tables: tables, unverifiedCount: unverifiedCount, exportData: exportData };
   }
 
   /**
@@ -1058,45 +1044,16 @@
   }
 
   /**
-   * Change summary (old → new version) for ONE language: the reference (langCol === refNewCol or
+   * Change summary (old → new version) of ONE language: the reference (langCol === refNewCol or
    * omitted) or a translated language (langCol = its old-version column, new text = translation).
-   * Returns KPIs, item lists, Markdown and a Word/print-ready HTML document.
+   * Returns a format-independent model rendered by 'summary' export adapters.
    */
-  function generateManagerialChangeSummary(params) {
+  function buildChangeSummary(params) {
     const rows = params.rows || [];
     const mappings = params.mappings || {};
-    const isEn = (params.uiLang || 'cs') === 'en';
     const langCol = params.langCol || mappings.refNewCol;
     const isReference = langCol === mappings.refNewCol;
-    const label = getLanguageLabel(mappings, langCol);
-    const documentName = params.documentName || params.companyName || '';
     const stubs = isReference ? null : resolveStubs(rows, params.translations || {}, langCol, mappings);
-
-    const L = isEn
-      ? {
-        title: 'Change summary – ' + label + ' (old → new version)', document: 'Document', language: 'Language',
-        reference: 'reference', refCols: 'Reference columns', date: 'Date', kpiTitle: '1. Change statistics',
-        metric: 'Category', count: 'Count', share: 'Share', total: 'Total paragraphs', unchanged: 'Unchanged',
-        modified: 'Modified', added: 'Added', removed: 'Removed', scope: 'Revision scope',
-        scopeText: 'of paragraphs were changed, added or removed.', statusTitle: 'Translation status',
-        verified: 'Verified', review: 'Awaiting review', missing: 'Translation missing',
-        modTitle: '2. Modified paragraphs', addTitle: '3. Added paragraphs', remTitle: '4. Removed paragraphs',
-        row: 'Row', similarity: 'Similarity', addedTerms: 'Added', removedTerms: 'Removed',
-        oldVersion: 'Old version', newVersion: 'New version', newVersionDiff: 'New version (changes highlighted)',
-        missingText: 'Translation missing', print: '🖨️ Print / Save as PDF', close: '✕ Close'
-      }
-      : {
-        title: 'Shrnutí změn – ' + label + ' (stará → nová verze)', document: 'Dokument', language: 'Jazyk',
-        reference: 'reference', refCols: 'Referenční sloupce', date: 'Datum', kpiTitle: '1. Statistika změn',
-        metric: 'Kategorie', count: 'Počet', share: 'Podíl', total: 'Celkem odstavců', unchanged: 'Beze změny',
-        modified: 'Upravené', added: 'Přidané', removed: 'Zrušené', scope: 'Rozsah revize',
-        scopeText: 'odstavců bylo upraveno, přidáno nebo zrušeno.', statusTitle: 'Stav překladu',
-        verified: 'Ověřeno', review: 'Čeká na kontrolu', missing: 'Chybí překlad',
-        modTitle: '2. Upravené odstavce', addTitle: '3. Přidané odstavce', remTitle: '4. Zrušené odstavce',
-        row: 'Řádek', similarity: 'Míra shody', addedTerms: 'Přidáno', removedTerms: 'Odebráno',
-        oldVersion: 'Stará verze', newVersion: 'Nová verze', newVersionDiff: 'Nová verze (vyznačené změny)',
-        missingText: 'Překlad chybí', print: '🖨️ Vytisknout / Uložit PDF', close: '✕ Zavřít'
-      };
 
     let total = 0;
     let unchanged = 0;
@@ -1147,204 +1104,91 @@
     const modified = modifiedItems.length;
     const added = addedItems.length;
     const removed = removedItems.length;
-    const pct = function (n) { return total > 0 ? Math.round((n / total) * 100) : 0; };
-    const pctChanged = pct(modified + added + removed);
-    const today = new Date().toISOString().split('T')[0];
-    const languageText = label + (isReference ? ' (' + L.reference + ')' : '');
+    const pctChanged = total > 0 ? Math.round(((modified + added + removed) / total) * 100) : 0;
 
-    // 1. Markdown
-    const md = [];
-    md.push('# ' + L.title);
-    md.push('');
-    if (documentName) md.push('**' + L.document + ':** ' + documentName + '  ');
-    md.push('**' + L.language + ':** ' + languageText + '  ');
-    md.push('**' + L.refCols + ':** ' + mappings.refOldCol + ' → ' + mappings.refNewCol + '  ');
-    md.push('**' + L.date + ':** ' + today);
-    md.push('');
-    md.push('## ' + L.kpiTitle);
-    md.push('');
-    md.push('| ' + L.metric + ' | ' + L.count + ' | ' + L.share + ' |');
-    md.push('| :--- | :--- | :--- |');
-    md.push('| **' + L.total + '** | ' + total + ' | 100% |');
-    md.push('| ' + L.unchanged + ' | ' + unchanged + ' | ' + pct(unchanged) + '% |');
-    md.push('| ' + L.modified + ' | ' + modified + ' | ' + pct(modified) + '% |');
-    md.push('| ' + L.added + ' | ' + added + ' | ' + pct(added) + '% |');
-    md.push('| ' + L.removed + ' | ' + removed + ' | ' + pct(removed) + '% |');
-    md.push('');
-    md.push('> **' + L.scope + ':** ' + pctChanged + ' % ' + L.scopeText);
-    md.push('');
-    if (!isReference) {
-      md.push('### ' + L.statusTitle);
-      md.push('');
-      md.push('| ' + L.metric + ' | ' + L.count + ' |');
-      md.push('| :--- | :--- |');
-      md.push('| ' + L.verified + ' | ' + status.verified + ' |');
-      md.push('| ' + L.review + ' | ' + status.review + ' |');
-      md.push('| ' + L.missing + ' | ' + status.missing + ' |');
-      md.push('');
-    }
-    if (modifiedItems.length > 0) {
-      md.push('## ' + L.modTitle);
-      md.push('');
-      modifiedItems.forEach(function (m) {
-        md.push('### ' + L.row + ' ' + m.rowNumber);
-        if (m.missing) {
-          md.push('- **' + L.missingText + '**');
-        } else {
-          md.push('- **' + L.similarity + ':** ' + Math.round(m.similarity * 100) + ' %');
-          if (m.addedTerms.length > 0) md.push('- **' + L.addedTerms + ':** `' + m.addedTerms.join('`, `') + '`');
-          if (m.removedTerms.length > 0) md.push('- **' + L.removedTerms + ':** `' + m.removedTerms.join('`, `') + '`');
-        }
-        md.push('');
-        md.push('**' + L.oldVersion + ':**');
-        md.push(mdQuote(m.oldText));
-        md.push('');
-        if (!m.missing) {
-          md.push('**' + L.newVersion + ':**');
-          md.push(mdQuote(m.newText));
-          md.push('');
-        }
-      });
-    }
-    if (addedItems.length > 0) {
-      md.push('## ' + L.addTitle);
-      md.push('');
-      addedItems.forEach(function (a) {
-        md.push('### ➕ ' + L.row + ' ' + a.rowNumber);
-        md.push(a.missing ? '*' + L.missingText + '*' : mdQuote(a.text));
-        md.push('');
-      });
-    }
-    if (removedItems.length > 0) {
-      md.push('## ' + L.remTitle);
-      md.push('');
-      removedItems.forEach(function (r) {
-        md.push('### 🗑️ ' + L.row + ' ' + r.rowNumber);
-        md.push(mdQuote(r.text));
-        md.push('');
-      });
-    }
-    const markdownDoc = md.join('\n');
-
-    // 2. HTML (Word document; with a print toolbar when params.printable is set)
-    const esc = escapeHtml;
-    const missingHtml = '<em class="missing">' + esc(L.missingText) + '</em>';
-    const kpiRow = function (name, n, cls) {
-      return '<tr><td>' + (cls ? '<span class="badge ' + cls + '">' + esc(name) + '</span>' : esc(name)) + '</td><td>' + n + '</td><td>' + pct(n) + '%</td></tr>';
-    };
-    const htmlDoc = `<!DOCTYPE html>
-<html lang="${isEn ? 'en' : 'cs'}" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-  <meta charset="UTF-8">
-  <title>${esc(L.title)}</title>
-  <!--[if gte mso 9]>
-  <xml>
-    <w:WordDocument>
-      <w:View>Print</w:View>
-      <w:Zoom>100</w:Zoom>
-      <w:DoNotOptimizeForBrowser/>
-    </w:WordDocument>
-  </xml>
-  <![endif]-->
-  <style>
-    @page { mso-page-orientation: portrait; size: 21cm 29.7cm; margin: 2cm; }
-    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; line-height: 1.5; color: #1e293b; margin: 30px; }
-    h1 { font-size: 20pt; color: #0f172a; border-bottom: 2pt solid #2563eb; padding-bottom: 6pt; margin-bottom: 12pt; }
-    h2 { font-size: 14pt; color: #1e40af; margin-top: 18pt; margin-bottom: 8pt; border-bottom: 1pt solid #cbd5e1; padding-bottom: 4pt; }
-    h3 { font-size: 12pt; color: #0f172a; margin-top: 12pt; margin-bottom: 4pt; }
-    table { width: 100%; border-collapse: collapse; margin-top: 8pt; margin-bottom: 14pt; }
-    th { background-color: #f1f5f9; color: #334155; font-weight: bold; border: 1pt solid #cbd5e1; padding: 6pt 8pt; text-align: left; }
-    td { border: 1pt solid #e2e8f0; padding: 6pt 8pt; vertical-align: top; }
-    .kpi-table th { background-color: #2563eb; color: #ffffff; }
-    .badge { font-weight: bold; padding: 2pt 5pt; border-radius: 3pt; font-size: 9pt; }
-    .badge-mod { background-color: #fef3c7; color: #b45309; }
-    .badge-add { background-color: #dcfce7; color: #15803d; }
-    .badge-rem { background-color: #fee2e2; color: #b91c1c; }
-    blockquote { border-left: 3pt solid #94a3b8; margin: 4pt 0 10pt 0; padding-left: 10pt; color: #334155; background: #f8fafc; }
-    ins { background-color: #dcfce7; color: #15803d; text-decoration: none; font-weight: bold; }
-    del { background-color: #fee2e2; color: #b91c1c; text-decoration: line-through; }
-    .missing { color: #b91c1c; }
-    .no-print-toolbar { position: sticky; top: 0; background: #ffffff; border-bottom: 1px solid #e2e8f0; padding: 0.75rem 1.5rem; margin: -30px -30px 20px; display: flex; justify-content: space-between; align-items: center; }
-    .no-print-toolbar button { border-radius: 6px; padding: 0.45rem 1rem; cursor: pointer; font-weight: 700; border: 1px solid #cbd5e1; background: #f1f5f9; }
-    .no-print-toolbar .btn-print { background: #2563eb; color: #fff; border-color: #2563eb; }
-    @media print { .no-print-toolbar { display: none !important; } body { margin: 0; } h2, h3, tr { break-inside: avoid; page-break-inside: avoid; } }
-  </style>
-</head>
-<body>
-  ${params.printable ? `<div class="no-print-toolbar"><strong>${esc(L.title)}</strong><span><button class="btn-print" onclick="window.print();">${L.print}</button> <button onclick="window.close();">${L.close}</button></span></div>` : ''}
-  <h1>${esc(L.title)}</h1>
-  <p>
-    ${documentName ? `<strong>${esc(L.document)}:</strong> ${esc(documentName)}<br>` : ''}
-    <strong>${esc(L.language)}:</strong> ${esc(languageText)}<br>
-    <strong>${esc(L.refCols)}:</strong> ${esc(mappings.refOldCol)} &rarr; ${esc(mappings.refNewCol)}<br>
-    <strong>${esc(L.date)}:</strong> ${today}
-  </p>
-
-  <h2>${esc(L.kpiTitle)}</h2>
-  <table class="kpi-table">
-    <tr><th>${esc(L.metric)}</th><th>${esc(L.count)}</th><th>${esc(L.share)}</th></tr>
-    <tr><td><strong>${esc(L.total)}</strong></td><td><strong>${total}</strong></td><td><strong>100%</strong></td></tr>
-    ${kpiRow(L.unchanged, unchanged, '')}
-    ${kpiRow(L.modified, modified, 'badge-mod')}
-    ${kpiRow(L.added, added, 'badge-add')}
-    ${kpiRow(L.removed, removed, 'badge-rem')}
-  </table>
-  ${isReference ? '' : `
-  <h3>${esc(L.statusTitle)}</h3>
-  <table>
-    <tr><th>${esc(L.metric)}</th><th>${esc(L.count)}</th></tr>
-    <tr><td>${esc(L.verified)}</td><td>${status.verified}</td></tr>
-    <tr><td>${esc(L.review)}</td><td>${status.review}</td></tr>
-    <tr><td>${esc(L.missing)}</td><td>${status.missing}</td></tr>
-  </table>`}
-
-  ${modifiedItems.length > 0 ? `<h2>${esc(L.modTitle)}</h2>` : ''}
-  ${modifiedItems.map(function (m) {
-    return `
-      <h3>${esc(L.row)} ${m.rowNumber} <span class="badge badge-mod">${esc(L.modified)}</span></h3>
-      <table>
-        <tr><th style="width:50%;">${esc(L.oldVersion)}</th><th style="width:50%;">${esc(L.newVersionDiff)}</th></tr>
-        <tr><td>${escapeHtmlMultiline(m.oldText)}</td><td>${m.missing ? missingHtml : renderDiffHtml(m.diffResult, 'inline').replace(/\r?\n/g, '<br>')}</td></tr>
-      </table>`;
-  }).join('')}
-
-  ${addedItems.length > 0 ? `<h2>${esc(L.addTitle)}</h2>` + addedItems.map(function (a) {
-    return `<h3>➕ ${esc(L.row)} ${a.rowNumber} <span class="badge badge-add">${esc(L.added)}</span></h3>
-      <blockquote>${a.missing ? missingHtml : escapeHtmlMultiline(a.text)}</blockquote>`;
-  }).join('') : ''}
-
-  ${removedItems.length > 0 ? `<h2>${esc(L.remTitle)}</h2>` + removedItems.map(function (r) {
-    return `<h3>🗑️ ${esc(L.row)} ${r.rowNumber} <span class="badge badge-rem">${esc(L.removed)}</span></h3>
-      <blockquote>${escapeHtmlMultiline(r.text)}</blockquote>`;
-  }).join('') : ''}
-</body>
-</html>`;
-
-    const stats = {
-      totalRows: total,
-      unchangedCount: unchanged,
-      modifiedCount: modified,
-      addedCount: added,
-      removedCount: removed,
-      pctChanged: pctChanged
-    };
     return {
-      language: label,
+      uiLang: params.uiLang || 'cs',
+      documentName: params.documentName || '',
+      language: getLanguageLabel(mappings, langCol),
       isReference: isReference,
-      stats: stats,
-      kpis: { total: total, unchanged: unchanged, modified: modified, added: added, removed: removed, pctChanged: pctChanged },
+      refOldCol: mappings.refOldCol,
+      refNewCol: mappings.refNewCol,
+      date: new Date().toISOString().split('T')[0],
+      stats: {
+        totalRows: total,
+        unchangedCount: unchanged,
+        modifiedCount: modified,
+        addedCount: added,
+        removedCount: removed,
+        pctChanged: pctChanged
+      },
       translationStatus: isReference ? null : status,
       modifiedItems: modifiedItems,
       addedItems: addedItems,
-      removedItems: removedItems,
-      markdown: markdownDoc,
-      htmlDoc: htmlDoc
+      removedItems: removedItems
+    };
+  }
+
+  /**
+   * Format-independent model of the new version of one language (targetCol = its old-version
+   * column, or the reference new column), rendered by 'document' export adapters.
+   * Paragraphs carry no headings; untranslated ones are marked as missing.
+   */
+  function buildDocumentModel(options) {
+    const rows = options.rows || [];
+    const mappings = options.mappings || {};
+    const targetCol = options.targetCol;
+    const tpl = options.template || {};
+    const isReference = targetCol === mappings.refNewCol;
+    const label = getLanguageLabel(mappings, targetCol);
+    // Stubs for languages never opened in the studio are generated on the fly, so unchanged
+    // paragraphs carry the approved old text and changed ones are reported as missing.
+    const stubs = isReference ? [] : resolveStubs(rows, options.translations || {}, targetCol, mappings);
+
+    const paragraphs = [];
+    let missingCount = 0;
+    let unverifiedCount = 0;
+    rows.forEach(function (row, idx) {
+      const classification = classifyRow(row[mappings.refOldCol], row[mappings.refNewCol]);
+      if (classification === 'REMOVED' || classification === 'EMPTY') return;
+
+      let text;
+      let missing = false;
+      if (isReference) {
+        text = String(cellValue(row[mappings.refNewCol]));
+      } else {
+        const item = stubs[idx];
+        text = item && item.targetNew ? String(item.targetNew) : '';
+        missing = !text.trim();
+        if (missing) missingCount++;
+        else if (!item.isVerified) unverifiedCount++;
+      }
+      paragraphs.push({ rowNumber: rowNumberOf(options.rowNumbers, idx), text: text.trim(), missing: missing });
+    });
+
+    return {
+      uiLang: options.uiLang || 'cs',
+      language: label,
+      isReference: isReference,
+      title: tpl.docTitle || options.documentName || '',
+      subtitle: tpl.docSubtitle ? tpl.docSubtitle.replace(/\{LANG\}/g, label) : label,
+      organization: tpl.companyName || '',
+      versionLabel: tpl.versionLabel || '',
+      dateLabel: tpl.effectiveDate || '',
+      introduction: tpl.introPreamble || '',
+      accentColor: /^#[0-9a-f]{3,8}$/i.test(tpl.accentColor || '') ? tpl.accentColor : '#2563eb',
+      signatures: tpl.showSignatures === true ? [tpl.signDept1 || '', tpl.signDept2 || ''] : [],
+      paragraphs: paragraphs,
+      missingCount: missingCount,
+      unverifiedCount: unverifiedCount,
+      isDraft: missingCount > 0 || unverifiedCount > 0
     };
   }
 
   return {
     escapeHtml: escapeHtml,
     escapeHtmlMultiline: escapeHtmlMultiline,
+    mdQuote: mdQuote,
     cleanText: cleanText,
     normalizeForComparison: normalizeForComparison,
     classifyRow: classifyRow,
@@ -1364,9 +1208,10 @@
     buildCopilotPrompt: buildCopilotPrompt,
     buildBatchCopilotPrompt: buildBatchCopilotPrompt,
     parseBatchTranslationResponse: parseBatchTranslationResponse,
-    generateManagerialChangeSummary: generateManagerialChangeSummary,
+    buildChangeSummary: buildChangeSummary,
+    buildDocumentModel: buildDocumentModel,
     prepareExportData: prepareExportData,
     prepareLanguageExportData: prepareLanguageExportData,
-    buildExportWorkbook: buildExportWorkbook
+    prepareExportTables: prepareExportTables
   };
 }));

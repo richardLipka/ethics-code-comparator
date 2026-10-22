@@ -1,8 +1,8 @@
-# Srovnávač verzí & Překladový asistent
+# Internationalisation Manager
 
-Offline webová aplikace pro porovnání **staré a nové verze referenčního textu** (smlouvy, směrnice, kodexy, manuály – libovolný dokument rozdělený na odstavce v řádcích tabulky) a pro aktualizaci **všech jeho jazykových verzí**. Ukáže, které odstavce se změnily, pomůže s překladem (prompty pro Copilot, hromadné vložení odpovědi) a vyexportuje výsledky do Excelu, dokumentu pro tisk a shrnutí změn.
+Offline webová aplikace pro správu jazykových verzí: porovnání **staré a nové verze referenčního textu** (smlouvy, směrnice, kodexy, manuály – libovolný dokument rozdělený na odstavce v řádcích tabulky) a pro aktualizaci **všech jeho jazykových verzí**. Ukáže, které odstavce se změnily, pomůže s překladem (prompty pro Copilot, hromadné vložení odpovědi) a vyexportuje výsledky do Excelu, dokumentu pro tisk a shrnutí změn.
 
-**▶ Online verze:** https://richardlipka.github.io/ethics-code-comparator/ – i online verze zpracovává soubory výhradně ve vašem prohlížeči, nic se neodesílá na server.
+**▶ Online verze:** https://richardlipka.github.io/internationalisation-manager/ – i online verze zpracovává soubory výhradně ve vašem prohlížeči, nic se neodesílá na server.
 
 ---
 
@@ -20,7 +20,7 @@ Offline webová aplikace pro porovnání **staré a nové verze referenčního t
 ## 📋 Postup práce
 
 ### Krok 1: Tabulka a výběr sloupců
-- Podporované formáty `.xlsx`, `.xls`, `.csv` (CSV se čte jako UTF-8). U sešitu s více listy vyberete list.
+- Výchozí importér čte `.xlsx`, `.xlsm`, `.xls`, `.ods` a `.csv` (CSV jako UTF-8). U sešitu s více listy vyberete list. Další formáty lze doplnit importním adaptérem (viz níže).
 - **Bílé znaky na začátku a konci buněk se odstraní** (dlouhé buňky začínající prázdnými řádky tak v náhledu nevypadají prázdné).
 - Volba **„První řádek obsahuje názvy sloupců“** – bez záhlaví jsou sloupce pojmenovány A, B, C… a první řádek je považován za data.
 - Vyberete dva **referenční sloupce**: starou a novou verzi textu (v libovolném jazyce).
@@ -48,6 +48,12 @@ Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se 
 - **Shrnutí změn vybraného jazyka:** statistika, upravené, nové a zrušené odstavce (u jazyka jeho stará a nová verze a stav kontroly) – Markdown, Word nebo tisk/PDF.
 - Po exportu aplikace upozorní, kolik odstavců ještě není schváleno nebo přeloženo.
 
+### Formáty importu a exportu (adaptéry)
+- Načítání souborů a všechny exporty jdou přes **adaptéry** – aplikace ani jádro nevolají knihovny konkrétních formátů přímo. Nový formát se přidá jedním souborem ve složce `js/io/` a jeho uvedením v `index.html`.
+- Výchozí adaptéry odpovídají dosavadnímu chování: import Excel/CSV, export tabulek do Excelu, dokument k tisku/HTML, shrnutí změn jako Markdown, Word a tisk.
+- Pokud je zaregistrováno víc tabulkových exportérů, Krok 4 nabídne volbu **formátu tabulek** (výchozí zůstává Excel).
+- Popis rozhraní a příklady: [docs/ADAPTERS.md](docs/ADAPTERS.md).
+
 ### Uložení projektu
 - Tlačítka **💾 Uložit projekt** a **📂 Načíst projekt** jsou v záhlaví stránky ve všech krocích.
 - Soubor `.json` obsahuje tabulku, výběr sloupců, názvy jazyků, rozpracované texty, stav kontroly a nastavení šablon. U každého jazyka se ukládá jen vaše práce; ostatní texty se při načtení doplní z tabulky, takže soubor je malý. Soubory starších verzí aplikace se načtou také.
@@ -61,8 +67,8 @@ Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se 
 npm test
 ```
 
-- **Jádro (27 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty, Smart Paste, všechny tři exporty do Excelu (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn pro referenci i jazyk, dokument pro tisk, úplnost a obecnost lokalizace.
-- **GUI v jsdom (28 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou výsledné soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, uložení a načtení projektu tlačítky v záhlaví, autosave, exporty a tisk.
+- **Jádro a adaptéry (33 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty, Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér, úplnost a obecnost lokalizace.
+- **GUI v jsdom (31 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
 
 V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlížeči.
 
@@ -76,11 +82,18 @@ V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlíže
 ├── css/app.css                # Styly (světlý/tmavý režim, responzivní rozvržení)
 ├── js/app.js                  # Řízení rozhraní a workflow
 ├── js/core/
-│   ├── comparator-engine.js   # Diff, klasifikace, pracovní data, prompty, Smart Paste, exporty, shrnutí změn
+│   ├── comparator-engine.js   # Diff, klasifikace, pracovní data, prompty, Smart Paste, modely exportů
 │   ├── storage.js             # Autosave, soubor projektu (.json)
-│   ├── pdf-export.js          # Dokument pro tisk, shrnutí změn (Word/Markdown/tisk)
 │   ├── i18n.js                # Čeština a angličtina
 │   └── sample-generator.js    # Ukázková data
+├── js/io/                     # Adaptéry importu a exportu
+│   ├── importers.js           # Registr importérů a model tabulky
+│   ├── excel-importer.js      # Výchozí importér: Excel / OpenDocument / CSV
+│   ├── exporters.js           # Registr exportérů, stahování a tisk
+│   ├── excel-exporter.js      # Výchozí export tabulek: Excel (.xlsx)
+│   ├── html-document-exporter.js  # Dokument pro tisk / HTML
+│   └── summary-exporters.js   # Shrnutí změn: Markdown, Word, tisk
+├── docs/ADAPTERS.md           # Jak napsat vlastní importér / exportér
 ├── lib/                       # SheetJS a jsdiff (vlastní licence)
 ├── sample/                    # Ukázkový sešit a skript pro jeho vytvoření
 ├── test/                      # Testy jádra a GUI

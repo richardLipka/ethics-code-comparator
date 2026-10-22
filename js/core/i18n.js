@@ -18,8 +18,8 @@
   const translations = {
     cs: {
       // Header
-      appTitle: 'Srovnávač verzí & Překladový asistent',
-      appSubtitle: 'Porovnání staré a nové verze referenčního textu a aktualizace všech jazykových verzí',
+      appTitle: 'Internationalisation Manager',
+      appSubtitle: 'Správa jazykových verzí: porovnání staré a nové verze referenčního textu a aktualizace překladů',
       securityBadge: '🔒 100% offline',
       securityTooltip: 'Tato aplikace běží výhradně lokálně ve vašem prohlížeči. Žádná data se neodesílají na internet ani do externích API.',
       saveProjectBtn: '💾 Uložit projekt',
@@ -44,7 +44,7 @@
       // Step 1
       step1Title: 'Krok 1: Nahrání tabulky a výběr sloupců',
       step1Desc: 'Nahrajte sešit, ve kterém je stará a nová verze referenčního textu a dosavadní verze ostatních jazyků (jeden odstavec na řádek).',
-      dropzoneTitle: 'Přetáhněte sem soubor (.xlsx, .xls, .csv) nebo klikněte pro výběr',
+      dropzoneTitle: 'Přetáhněte sem soubor (Excel, OpenDocument nebo CSV) nebo klikněte pro výběr',
       dropzoneSubtitle: 'Soubor je zpracován výhradně ve vašem prohlížeči, bez jakéhokoliv odesílání na server.',
       loadSampleBtn: '🚀 Vyzkoušet na ukázkových datech',
       downloadSampleBtn: '📥 Stáhnout ukázkový soubor (.xlsx)',
@@ -128,6 +128,7 @@
       step4Title: 'Krok 4: Export výsledků',
       step4Desc: 'Stáhněte sešity Excel, dokument pro tisk nebo shrnutí změn. Dokument, shrnutí a částečný sešit se vytvářejí pro jazyk vybraný níže.',
       exportLangLabel: 'Jazyk pro dokument, shrnutí změn a částečný export:',
+      tableFormatLabel: 'Formát tabulek:',
       comprehensiveTitle: 'Kompletní sešit (stará + nová verze)',
       comprehensiveDesc: 'Všechny původní sloupce a řádky; nová verze každého jazyka je ve svém sloupci (existujícím nebo nově vloženém hned za starou verzi). Druhý list ukazuje stav kontroly.',
       comprehensiveBtn: '📥 Stáhnout kompletní sešit (.xlsx)',
@@ -244,6 +245,7 @@
       confirmPrintAll: 'Otevřít tisková okna pro všech {COUNT} jazyků?',
       confirmResumeProject: 'V prohlížeči byl nalezen rozpracovaný projekt z {DATE}. Chcete v něm pokračovat?',
       alertNoSheets: 'Nahraný soubor neobsahuje žádné listy.',
+      alertUnsupportedFile: 'Soubor "{NAME}" nelze načíst – podporované formáty: {FORMATS}.',
       alertEmptySheet: 'Vybraný list je prázdný.',
       alertFileReadError: 'Soubor se nepodařilo načíst: {MSG}',
       alertProjectLoadError: 'Projekt se nepodařilo načíst. {MSG}',
@@ -258,8 +260,8 @@
 
     en: {
       // Header
-      appTitle: 'Version Comparator & Translation Assistant',
-      appSubtitle: 'Compare the old and new version of a reference text and update every language version',
+      appTitle: 'Internationalisation Manager',
+      appSubtitle: 'Manage language versions: compare the old and new reference text and update the translations',
       securityBadge: '🔒 100% offline',
       securityTooltip: 'This application runs entirely locally in your browser. No data is sent to the internet or any external API.',
       saveProjectBtn: '💾 Save project',
@@ -284,7 +286,7 @@
       // Step 1
       step1Title: 'Step 1: Upload the table and choose columns',
       step1Desc: 'Upload a workbook with the old and the new version of the reference text and the current versions of the other languages (one paragraph per row).',
-      dropzoneTitle: 'Drag & drop a file (.xlsx, .xls, .csv) here or click to browse',
+      dropzoneTitle: 'Drag & drop a file (Excel, OpenDocument or CSV) here or click to browse',
       dropzoneSubtitle: 'The file is processed entirely in your browser and never uploaded to a server.',
       loadSampleBtn: '🚀 Try with sample data',
       downloadSampleBtn: '📥 Download sample file (.xlsx)',
@@ -368,6 +370,7 @@
       step4Title: 'Step 4: Export the results',
       step4Desc: 'Download Excel workbooks, a printable document or a change summary. The document, the summary and the partial workbook are created for the language selected below.',
       exportLangLabel: 'Language for the document, change summary and partial export:',
+      tableFormatLabel: 'Table format:',
       comprehensiveTitle: 'Full workbook (old + new version)',
       comprehensiveDesc: 'All original columns and rows; the new version of every language is in its own column (existing, or inserted right after the old version). A second sheet shows the review status.',
       comprehensiveBtn: '📥 Download full workbook (.xlsx)',
@@ -484,6 +487,7 @@
       confirmPrintAll: 'Open print windows for all {COUNT} languages?',
       confirmResumeProject: 'A saved project from {DATE} was found. Do you want to resume it?',
       alertNoSheets: 'The uploaded file contains no sheets.',
+      alertUnsupportedFile: 'The file "{NAME}" cannot be loaded – supported formats: {FORMATS}.',
       alertEmptySheet: 'The selected sheet is empty.',
       alertFileReadError: 'The file could not be read: {MSG}',
       alertProjectLoadError: 'The project could not be loaded. {MSG}',

@@ -1,5 +1,5 @@
 /**
- * Generates the sample Excel file: sample/vzorec_eticky_kodex_2024_2026.xlsx
+ * Generates the sample Excel file: sample/ukazkovy_dokument.xlsx
  * Run with: node sample/generate_sample.js
  */
 
@@ -29,9 +29,9 @@ worksheet['!cols'] = colWidths;
 
 // Create workbook
 const workbook = XLSX.utils.book_new();
-XLSX.utils.book_append_sheet(workbook, worksheet, 'Eticky_Kodex');
+XLSX.utils.book_append_sheet(workbook, worksheet, 'Data');
 
-const outputPath = path.join(__dirname, 'vzorec_eticky_kodex_2024_2026.xlsx');
+const outputPath = path.join(__dirname, 'ukazkovy_dokument.xlsx');
 XLSX.writeFile(workbook, outputPath);
 
 console.log(`✓ Vzorový soubor Excel byl úspěšně vygenerován: ${outputPath}`);
