@@ -1754,40 +1754,85 @@
   }
 
   /**
-   * Checkboxes of the columns that accompany the selected language in the partial workbook
-   * (by default the reference old and new version).
+   * Columns that accompany the selected language in the partial workbook, in two groups:
+   * new versions first (the reference's new version and the current translation work of the
+   * other languages), then the original columns of the sheet. Default: old and new reference.
+   * Entries are column names, or { newOf: <old-version column> } for a language's new version.
    */
+  function contextKey(entry) {
+    return typeof entry === 'string' ? 'col:' + entry : 'new:' + entry.newOf;
+  }
+
   function renderPartialContextOptions() {
     const container = elements.partialContextContainer;
     if (!container) return;
+    const m = state.mappings;
     const langCol = state.exportLangCol;
-    const isReference = langCol === state.mappings.refNewCol;
-    const own = isReference
-      ? [state.mappings.refOldCol, state.mappings.refNewCol]
-      : [langCol, state.mappings.languages[langCol] && state.mappings.languages[langCol].newCol];
+    const isReference = langCol === m.refNewCol;
     if (!Array.isArray(state.partialContextCols)) {
-      state.partialContextCols = [state.mappings.refOldCol, state.mappings.refNewCol].filter(Boolean);
+      state.partialContextCols = [m.refOldCol, m.refNewCol].filter(Boolean);
     }
 
+    const languageNewCols = m.targetCols.map(function (c) { return m.languages[c] && m.languages[c].newCol; }).filter(Boolean);
+    const newVersions = [];
+    if (!isReference && m.refNewCol) {
+      newVersions.push({ entry: m.refNewCol, label: columnDisplayName(m.refNewCol) });
+    }
+    m.targetCols.forEach(function (c) {
+      if (c === langCol) return;
+      const cfg = m.languages[c] || {};
+      const colName = cfg.newCol || cfg.newColName || defaultNewColNameFor(c);
+      newVersions.push({ entry: { newOf: c }, label: columnDisplayName(colName) + ' (' + languageLabel(c) + ')' });
+    });
+
+    const own = isReference ? [m.refOldCol, m.refNewCol] : [langCol, m.languages[langCol] && m.languages[langCol].newCol];
+    const originals = state.headers
+      .filter(function (h) {
+        return own.indexOf(h) === -1 && h !== m.refNewCol && languageNewCols.indexOf(h) === -1;
+      })
+      .map(function (h) { return { entry: h, label: columnDisplayName(h) }; });
+
+    const selectedKeys = state.partialContextCols.map(contextKey);
+    const displayOrder = newVersions.concat(originals).map(function (o) { return contextKey(o.entry); });
     container.innerHTML = '';
-    state.headers.forEach(function (h) {
-      if (own.indexOf(h) !== -1) return;
-      const label = document.createElement('label');
-      label.className = 'checkbox-label';
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = h;
-      cb.checked = state.partialContextCols.indexOf(h) !== -1;
-      cb.addEventListener('change', function () {
-        const list = state.partialContextCols;
-        const pos = list.indexOf(h);
-        if (cb.checked && pos === -1) list.push(h);
-        if (!cb.checked && pos !== -1) list.splice(pos, 1);
-        persistState(300);
+    [[t('partialGroupNew'), newVersions], [t('partialGroupOriginal'), originals]].forEach(function (group) {
+      if (group[1].length === 0) return;
+      const box = document.createElement('div');
+      box.className = 'partial-context-group';
+      const title = document.createElement('div');
+      title.className = 'partial-context-title';
+      title.textContent = group[0];
+      const items = document.createElement('div');
+      items.className = 'partial-context-items';
+      group[1].forEach(function (option) {
+        const key = contextKey(option.entry);
+        const label = document.createElement('label');
+        label.className = 'checkbox-label';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = key;
+        cb.checked = selectedKeys.indexOf(key) !== -1;
+        cb.addEventListener('change', function () {
+          const list = state.partialContextCols;
+          const pos = list.map(contextKey).indexOf(key);
+          if (cb.checked && pos === -1) list.push(option.entry);
+          if (!cb.checked && pos !== -1) list.splice(pos, 1);
+          // Exported in the order shown (new versions first); entries not offered for the current
+          // language (e.g. its own columns) keep their place at the end
+          const rank = function (entry) {
+            const i = displayOrder.indexOf(contextKey(entry));
+            return i === -1 ? displayOrder.length : i;
+          };
+          list.sort(function (x, y) { return rank(x) - rank(y); });
+          persistState(300);
+        });
+        label.appendChild(cb);
+        label.appendChild(document.createTextNode(option.label));
+        items.appendChild(label);
       });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(columnDisplayName(h)));
-      container.appendChild(label);
+      box.appendChild(title);
+      box.appendChild(items);
+      container.appendChild(box);
     });
   }
 

@@ -348,7 +348,9 @@
       invalidSettings = true;
     }
     if (result.partialContextCols !== undefined && result.partialContextCols !== null &&
-      (!Array.isArray(result.partialContextCols) || result.partialContextCols.some(function (c) { return typeof c !== 'string'; }))) {
+      (!Array.isArray(result.partialContextCols) || result.partialContextCols.some(function (c) {
+        return typeof c !== 'string' && !(isPlainObject(c) && typeof c.newOf === 'string');
+      }))) {
       result.partialContextCols = null;
       invalidSettings = true;
     }

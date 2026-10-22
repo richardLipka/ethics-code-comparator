@@ -1527,12 +1527,28 @@ mark.search-highlight {
 }
 
 .partial-context-list {
+  margin-bottom: 0.75rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.partial-context-group + .partial-context-group {
+  margin-top: 0.5rem;
+}
+
+.partial-context-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  margin-bottom: 0.25rem;
+}
+
+.partial-context-items {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem 0.85rem;
-  margin-bottom: 0.75rem;
-  max-height: 140px;
-  overflow-y: auto;
 }
 
 .partial-context-list .checkbox-label {

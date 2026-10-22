@@ -314,6 +314,18 @@ runTest('Export tabulek + Excel adaptér (částečný): číslo řádku, vybran
   assert.deepStrictEqual(data[1], { 'Řádek': 3, 'Reference old': 'Limit is 35 EUR.', 'Reference new': 'Limit is 50 EUR.', Polish: 'Limit to 35 EUR.', 'Polish NEW': 'Limit to 50 EUR.', Stav: 'Ověřeno' });
   assert.strictEqual(data[2].Stav, 'Chybí překlad');
 
+  // Nová verze jiného jazyka jako další sloupec: aktuální překlad, ne zastaralá buňka listu
+  const czWork = ComparatorEngine.generateTargetStub(g.rows, 'Czech', g.mappings.refOldCol, g.mappings.refNewCol, 'Czech new');
+  czWork[2].targetNew = 'Nový odstavec CZ';
+  const withNew = ComparatorEngine.prepareLanguageExportData({
+    rows: g.rows, headers: g.headers, mappings: g.mappings, translations: { Czech: czWork, Polish: translations.Polish },
+    langCol: 'Polish', contextCols: [{ newOf: 'Czech' }, 'Czech new', 'Reference new', { newOf: 'Polish' }, { newOf: 'Nope' }]
+  });
+  assert.deepStrictEqual(withNew.headers, ['Řádek', 'Czech new', 'Reference new', 'Polish', 'Polish NEW', 'Stav'],
+    'Sloupec nové verze se nezdvojí; vlastní jazyk a neznámé jazyky se vynechají');
+  assert.deepStrictEqual(withNew.data.map(r => r['Czech new']), ['Stejný text.', 'Limit je 50 EUR.', 'Nový odstavec CZ', ''],
+    'Hodnoty jsou z aktuální práce (doplněný nezměněný odstavec, nový text)');
+
   // Jazyk s existujícím sloupcem nové verze a jiné kontextové sloupce
   const cz = ComparatorEngine.prepareLanguageExportData({
     rows: g.rows, headers: g.headers, mappings: g.mappings, langCol: 'Czech', contextCols: ['Reference new', 'Polish', 'Czech']
@@ -452,11 +464,12 @@ runTest('StorageManager: uložený projekt se načte bez upozornění (skutečn�
   const json = StorageManager.serializeProjectJson({
     fileName: 'data.xlsx', headers: g.headers, rows: g.rows, rowNumbers: g.rowNumbers, mappings: g.mappings,
     translations: { Czech: ComparatorEngine.generateTargetStub(g.rows, 'Czech', g.mappings.refOldCol, g.mappings.refNewCol, 'Czech new') },
-    pdfTemplate: { docTitle: 'X' }, partialContextCols: ['Notes'],
+    pdfTemplate: { docTitle: 'X' }, partialContextCols: ['Notes', { newOf: 'Czech' }],
     skippedRows: [{ rowNumber: 4, row: { 'Reference old': 'Nadpis' }, auto: false }]
   });
   const parsed = StorageManager.parseProjectJson(json);
   assert.deepStrictEqual(parsed.warnings, []);
+  assert.deepStrictEqual(parsed.partialContextCols, ['Notes', { newOf: 'Czech' }], 'Výběr dalších sloupců včetně nových verzí');
   assert.deepStrictEqual(parsed.skippedRows, [{ rowNumber: 4, row: { 'Reference old': 'Nadpis' }, auto: false }], 'Přeskočené řádky jsou součástí projektu');
   const broken = StorageManager.parseProjectJson(JSON.stringify({ ...JSON.parse(json), skippedRows: [{ rowNumber: 'x' }] }));
   assert.deepStrictEqual(broken.skippedRows, []);

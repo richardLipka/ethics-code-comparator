@@ -739,9 +739,12 @@
   }
 
   /**
-   * Partial workbook for one language: row number, chosen context columns (e.g. the reference),
-   * old and new version of the language and its status. For the reference itself (langCol ===
-   * refNewCol) the old and new reference columns are exported.
+   * Partial workbook for one language: row number, chosen context columns, old and new version of
+   * the language and its status. For the reference itself (langCol === refNewCol) the old and new
+   * reference columns are exported.
+   * contextCols entries: a column name of the sheet, or { newOf: <old-version column> } for the
+   * new version (current translation work) of another language. A sheet column that serves as a
+   * language's new-version column is exported with the current translation, not the stale cell.
    */
   function prepareLanguageExportData(options) {
     const rows = options.rows || [];
@@ -755,11 +758,37 @@
     const newColExisting = isReference ? mappings.refNewCol : (info.newCol && headers.indexOf(info.newCol) !== -1 ? info.newCol : '');
     const stubs = isReference ? null : resolveStubs(rows, options.translations || {}, langCol, mappings);
 
-    const contextCols = (options.contextCols || []).filter(function (c) {
-      return headers.indexOf(c) !== -1 && c !== oldCol && c !== newColExisting;
+    const targetCols = (mappings.targetCols || []).filter(function (c) { return headers.indexOf(c) !== -1; });
+    const newVersionOwner = {};
+    targetCols.forEach(function (c) {
+      const inf = getLanguageInfo(mappings, c);
+      if (inf.newCol && headers.indexOf(inf.newCol) !== -1) newVersionOwner[inf.newCol] = c;
+    });
+
+    const context = [];
+    const seen = {};
+    (options.contextCols || []).forEach(function (c) {
+      let entry = null;
+      if (c && typeof c === 'object' && typeof c.newOf === 'string') {
+        if (c.newOf !== langCol && targetCols.indexOf(c.newOf) !== -1) entry = { newOf: c.newOf };
+      } else if (typeof c === 'string' && headers.indexOf(c) !== -1 && c !== oldCol && c !== newColExisting) {
+        entry = newVersionOwner[c] && newVersionOwner[c] !== langCol ? { newOf: newVersionOwner[c] } : { col: c };
+      }
+      if (!entry) return;
+      const key = entry.newOf ? 'new:' + entry.newOf : 'col:' + entry.col;
+      if (seen[key]) return;
+      seen[key] = true;
+      if (entry.newOf) {
+        const inf = getLanguageInfo(mappings, entry.newOf);
+        entry.name = inf.newCol && headers.indexOf(inf.newCol) !== -1 ? inf.newCol : inf.newColName;
+        entry.stubs = resolveStubs(rows, options.translations || {}, entry.newOf, mappings);
+      } else {
+        entry.name = entry.col;
+      }
+      context.push(entry);
     });
     const taken = [labels.row];
-    const contextNames = contextCols.map(function (c) { return uniqueColName(c, taken); });
+    const contextNames = context.map(function (e) { return uniqueColName(e.name, taken); });
     const oldName = uniqueColName(oldCol, taken);
     const newName = uniqueColName(newColExisting || info.newColName, taken);
     const statusName = isReference ? null : uniqueColName(labels.status, taken);
@@ -767,7 +796,9 @@
     const data = rows.map(function (row, idx) {
       const out = {};
       out[labels.row] = rowNumberOf(options.rowNumbers, idx);
-      contextCols.forEach(function (c, k) { out[contextNames[k]] = cellValue(row[c]); });
+      context.forEach(function (e, k) {
+        out[contextNames[k]] = e.stubs ? cellValue(e.stubs[idx] && e.stubs[idx].targetNew) : cellValue(row[e.col]);
+      });
       out[oldName] = cellValue(row[oldCol]);
       out[newName] = isReference ? cellValue(row[mappings.refNewCol]) : cellValue(stubs[idx] && stubs[idx].targetNew);
       if (statusName) out[statusName] = labels[getStubState(stubs[idx])];

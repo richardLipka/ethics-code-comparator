@@ -608,42 +608,63 @@ runTest('Excel: kompletní a nová verze tlačítky v Kroku 4', async () => {
   assert.ok(!('CS 2024' in cleanRows[0]) && cleanRows.some(r => r['CS 2026'] === 'Dary do 50 EUR.'));
 });
 
-runTest('Excel: částečný sešit pro vybraný jazyk s volitelnými referenčními sloupci', async () => {
+runTest('Excel: částečný sešit – nové verze ostatních jazyků (přednostně) i původní sloupce jako další sloupce', async () => {
   const { window, document } = createDomEnvironment();
   const XLSX = window.XLSX;
   openCzechStudio(window);
   typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Nový text 4.');
+  // Angličtina má rozpracovaný nový překlad stejného odstavce
+  Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab')).find(t => t.querySelector('span').textContent === 'EN').click();
+  typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Gifts up to EUR 50.');
   document.getElementById('goToExportBtn').click();
+  const select = document.getElementById('pdfLangSelect');
+  select.value = 'CS 2024';
+  select.dispatchEvent(new window.Event('change'));
 
   const context = document.getElementById('partialContextContainer');
-  const boxes = Array.from(context.querySelectorAll('input[type="checkbox"]'));
-  assert.deepStrictEqual(boxes.filter(b => b.checked).map(b => b.value), ['DE 2024 (Referenz)', 'DE 2026 (Referenz)'], 'Výchozí kontext = reference');
-  assert.ok(!boxes.some(b => b.value === 'CS 2024'), 'Vlastní sloupec jazyka není mezi kontextem');
+  const groups = Array.from(context.querySelectorAll('.partial-context-group'));
+  assert.deepStrictEqual(groups.map(gr => gr.querySelector('.partial-context-title').textContent),
+    ['Nové verze (aktuální stav překladu)', 'Původní sloupce tabulky'], 'Nové verze jsou uvedeny jako první');
+  const newLabels = Array.from(groups[0].querySelectorAll('label')).map(l => l.textContent);
+  assert.strictEqual(newLabels[0], 'DE 2026 (Referenz)');
+  assert.ok(newLabels.includes('EN 2026 (EN)') && newLabels.includes('FR 2026 (FR)'), 'Nové sloupce všech ostatních jazyků');
+  assert.ok(!newLabels.some(l => l.startsWith('CS 2026')), 'Vlastní nová verze exportovaného jazyka není mezi dalšími sloupci');
+  const originalLabels = Array.from(groups[1].querySelectorAll('label')).map(l => l.textContent);
+  assert.ok(originalLabels.includes('EN 2024') && originalLabels.includes('DE 2024 (Referenz)') && !originalLabels.includes('CS 2024'));
 
-  // Uživatel přidá angličtinu a odebere starou referenci
-  const en = boxes.find(b => b.value === 'EN 2024');
-  en.checked = true;
-  en.dispatchEvent(new window.Event('change'));
-  const refOld = boxes.find(b => b.value === 'DE 2024 (Referenz)');
-  refOld.checked = false;
-  refOld.dispatchEvent(new window.Event('change'));
+  const boxes = Array.from(context.querySelectorAll('input[type="checkbox"]'));
+  assert.deepStrictEqual(boxes.filter(bx => bx.checked).map(bx => bx.value).sort(), ['col:DE 2024 (Referenz)', 'col:DE 2026 (Referenz)'], 'Výchozí: stará a nová reference');
+
+  // Uživatel přidá novou verzi angličtiny a původní angličtinu, odebere starou referenci
+  const tick = (value, checked) => {
+    const bx = boxes.find(x => x.value === value);
+    bx.checked = checked;
+    bx.dispatchEvent(new window.Event('change'));
+  };
+  tick('col:EN 2024', true);
+  tick('new:EN 2024', true);
+  tick('col:DE 2024 (Referenz)', false);
 
   document.getElementById('downloadPartialBtn').click();
   const out = await lastWorkbook(window);
   assert.strictEqual(out.name, 'ukazkovy_dokument_CS.xlsx');
   const sheet = out.wb.Sheets[out.wb.SheetNames[0]];
-  assert.deepStrictEqual(plain(XLSX.utils.sheet_to_json(sheet, { header: 1 })[0]), ['Řádek', 'DE 2026 (Referenz)', 'EN 2024', 'CS 2024', 'CS 2026', 'Stav']);
+  assert.deepStrictEqual(plain(XLSX.utils.sheet_to_json(sheet, { header: 1 })[0]),
+    ['Řádek', 'DE 2026 (Referenz)', 'EN 2026', 'EN 2024', 'CS 2024', 'CS 2026', 'Stav'], 'Nové verze před původními sloupci');
   const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   assert.strictEqual(data.length, 15);
   assert.strictEqual(data[3]['Řádek'], 5);
+  assert.strictEqual(data[3]['EN 2026'], 'Gifts up to EUR 50.', 'Nová verze jiného jazyka = aktuální překlad');
+  assert.strictEqual(data[0]['EN 2026'], data[0]['EN 2024'], 'Nezměněný odstavec převzat');
   assert.strictEqual(data[3]['CS 2026'], 'Nový text 4.');
   assert.strictEqual(data[3].Stav, 'Čeká na kontrolu');
 
-  // Jiný jazyk ve výběru → kontext se přepočítá
-  const select = document.getElementById('pdfLangSelect');
+  // Jiný jazyk ve výběru → kontext se přepočítá a výběr zůstane uložen
   select.value = 'FR 2024';
   select.dispatchEvent(new window.Event('change'));
-  assert.ok(Array.from(context.querySelectorAll('input')).some(b => b.value === 'CS 2024'));
+  const values = Array.from(context.querySelectorAll('input')).map(bx => bx.value);
+  assert.ok(values.includes('new:CS 2024') && values.includes('col:CS 2024'));
+  assert.ok(Array.from(context.querySelectorAll('input')).find(bx => bx.value === 'new:EN 2024').checked);
 });
 
 // Náhled dat
