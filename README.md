@@ -36,6 +36,7 @@ Offline webová aplikace pro správu jazykových verzí: porovnání **staré a 
 
 ### Krok 3: Aktualizace překladů
 - Pro každý odstavec: rozdíl v referenci, stará verze jazyka, editor nové verze a živý rozdíl stará → nová verze jazyka. Nad texty je jen číslo řádku a typ změny – text buňky se neopakuje.
+- **Pomocný referenční jazyk (Auxiliary Language Context):** volitelný výběr dalšího jazyka v panelu studia (např. anglická nová verze). Zobrazí se jako 5. sloupec karty vedle referenčního diffu s tlačítkem „Použít jako základ“ (vloží text přímo do editoru) a je automaticky zahrnut i do individuálních a hromadných promptů pro Copilot.
 - Nezměněné odstavce se převezmou automaticky; zrušené se v nové verzi vynechají.
 - Prompt pro Copilot pro jeden odstavec, hromadný prompt pro všechny změny a **Smart Paste** – odpověď se rozdělí podle značek řádků (`[#12]`, `Řádek 12:`…); nespárované značky se zobrazí a nikam se nezapíší.
 - Schvalování po odstavcích (i `Ctrl + Enter`), filtry, hledání, přehled postupu všech jazyků, hromadné schválení nezměněných.
@@ -71,7 +72,7 @@ npm test
 ```
 
 - **Jádro a adaptéry (36 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty, Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér, úplnost a obecnost lokalizace.
-- **GUI v jsdom (40 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
+- **GUI v jsdom (41 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, pomocný referenční jazyk, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
 
 V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlížeči.
 

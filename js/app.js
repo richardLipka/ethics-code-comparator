@@ -31,6 +31,7 @@
     // Translations map: { [targetCol]: [ { rowIndex, targetNew, status, isVerified, notes } ] }
     translations: {},
     activeTargetCol: '',
+    auxiliaryCol: '',
     filterStatus: 'all', // 'all', 'pending', 'verified', 'modified', 'added', 'removed'
     searchQuery: '',
     layoutMode: '4cols', // '4cols' | '2x2'
@@ -111,6 +112,7 @@
     batchPromptBtn: document.getElementById('batchPromptBtn'),
     smartPasteBtn: document.getElementById('smartPasteBtn'),
     layoutToggleBtn: document.getElementById('layoutToggleBtn'),
+    auxLangSelect: document.getElementById('auxLangSelect'),
     articlesContainer: document.getElementById('articlesContainer'),
     currentLangProgressText: document.getElementById('currentLangProgressText'),
     currentLangProgressBar: document.getElementById('currentLangProgressBar'),
@@ -319,10 +321,9 @@
     // Update theme toggle button text
     elements.themeToggleBtn.textContent = state.theme === 'dark' ? t('themeLight') : t('themeDark');
 
-    // Update layout toggle text
-    if (elements.layoutToggleBtn) {
-      elements.layoutToggleBtn.textContent = state.layoutMode === '4cols' ? t('layout4Cols') : t('layout2x2');
-    }
+    // Update layout toggle text and auxiliary language options
+    updateLayoutToggleText();
+    updateAuxLangOptions();
   }
 
   /**
@@ -349,15 +350,25 @@
   /**
    * Layout Mode Switcher (4-Columns Side-by-Side vs 2x2 Grid)
    */
+  function updateLayoutToggleText() {
+    if (elements.layoutToggleBtn) {
+      if (state.layoutMode === '4cols') {
+        elements.layoutToggleBtn.textContent = state.auxiliaryCol ? t('layout5Cols') : t('layout4Cols');
+      } else {
+        elements.layoutToggleBtn.textContent = t('layout2x2');
+      }
+    }
+  }
+
   function initLayoutMode() {
     const saved = readPref('comparator_layout', '4cols');
     state.layoutMode = saved === '2x2' ? '2x2' : '4cols';
+    updateLayoutToggleText();
     if (elements.layoutToggleBtn) {
-      elements.layoutToggleBtn.textContent = state.layoutMode === '4cols' ? t('layout4Cols') : t('layout2x2');
       elements.layoutToggleBtn.addEventListener('click', function () {
         state.layoutMode = state.layoutMode === '4cols' ? '2x2' : '4cols';
         writePref('comparator_layout', state.layoutMode);
-        elements.layoutToggleBtn.textContent = state.layoutMode === '4cols' ? t('layout4Cols') : t('layout2x2');
+        updateLayoutToggleText();
         renderArticleCards();
       });
     }
@@ -599,6 +610,7 @@
     state.mappings = { refOldCol: '', refNewCol: '', targetCols: [], languages: {} };
     state.translations = {};
     state.activeTargetCol = '';
+    state.auxiliaryCol = '';
     state.exportLangCol = '';
     state.partialContextCols = null;
     state.filterStatus = 'all';
@@ -1172,6 +1184,8 @@
    * Step 3: Render Translation Studio (Full-width side-by-side)
    */
   function renderTranslationStudio() {
+    updateAuxLangOptions();
+    updateLayoutToggleText();
     renderCrossLanguageMatrix();
     renderLanguageTabs();
     renderArticleCards();
@@ -1209,6 +1223,7 @@
 
       pill.addEventListener('click', function () {
         state.activeTargetCol = col;
+        updateAuxLangOptions();
         renderLanguageTabs();
         renderArticleCards();
         updateLanguageProgress();
@@ -1290,6 +1305,7 @@
 
       tab.addEventListener('click', function () {
         state.activeTargetCol = col;
+        updateAuxLangOptions();
         renderCrossLanguageMatrix();
         renderLanguageTabs();
         renderArticleCards();
@@ -1311,6 +1327,47 @@
 
     elements.currentLangProgressText.textContent = `${verified} / ${total} ${t('progressDone')} (${pct}%)`;
     elements.currentLangProgressBar.style.width = pct + '%';
+  }
+
+  /**
+   * Auxiliary Language Selector (Context helper)
+   */
+  function updateAuxLangOptions() {
+    if (!elements.auxLangSelect) return;
+    const select = elements.auxLangSelect;
+    const currentVal = state.auxiliaryCol;
+    select.innerHTML = '';
+
+    const optNone = document.createElement('option');
+    optNone.value = '';
+    optNone.textContent = t('auxLangNone');
+    select.appendChild(optNone);
+
+    const availableCols = (state.mappings && state.mappings.targetCols) || [];
+    availableCols.forEach(function (col) {
+      if (col === state.activeTargetCol) return;
+      const opt = document.createElement('option');
+      opt.value = col;
+      opt.textContent = languageLabel(col);
+      select.appendChild(opt);
+    });
+
+    if (currentVal && currentVal !== state.activeTargetCol && availableCols.includes(currentVal)) {
+      select.value = currentVal;
+    } else {
+      select.value = '';
+      state.auxiliaryCol = '';
+    }
+  }
+
+  function initAuxLangSelector() {
+    if (!elements.auxLangSelect) return;
+    elements.auxLangSelect.addEventListener('change', function () {
+      state.auxiliaryCol = elements.auxLangSelect.value;
+      persistState(0);
+      updateLayoutToggleText();
+      renderArticleCards();
+    });
   }
 
   function highlightQuery(text, query) {
@@ -1349,6 +1406,10 @@
     const esc = ComparatorEngine.escapeHtml;
     const langLabel = esc(languageLabel(col));
     const refLabel = esc(columnDisplayName(state.mappings.refNewCol));
+    const auxCol = (state.auxiliaryCol && state.auxiliaryCol !== col && state.translations[state.auxiliaryCol])
+      ? state.auxiliaryCol
+      : '';
+    const auxLabel = auxCol ? esc(languageLabel(auxCol)) : '';
 
     let renderedCount = 0;
 
@@ -1382,8 +1443,77 @@
       const refDiffRes = ComparatorEngine.computeDiff(stub.refOld, stub.refNew);
       const refDiffHtml = ComparatorEngine.renderDiffHtml(refDiffRes, 'inline');
 
-      // 2. Target Diff (old -> new version of the language)
+      // 2. Auxiliary Reference Column (Optional context)
+      let colAuxHtml = '';
+      if (auxCol && state.translations[auxCol]) {
+        const auxStub = state.translations[auxCol][idx];
+        const auxText = (auxStub && auxStub.targetNew) ? auxStub.targetNew : (auxStub ? auxStub.targetOld : (state.rows[idx] ? state.rows[idx][auxCol] : ''));
+        let auxBadge = '';
+        if (auxStub && auxStub.isVerified) {
+          auxBadge = `<span class="badge badge-success" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('markVerified')}</span>`;
+        } else if (auxStub && auxStub.targetNew && auxStub.targetNew !== auxStub.targetOld) {
+          auxBadge = `<span class="badge badge-warning" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('statusDraft')}</span>`;
+        } else if (auxStub && auxStub.classification === 'UNCHANGED') {
+          auxBadge = `<span class="badge badge-neutral" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('badgeUnchanged')}</span>`;
+        } else if (auxText) {
+          auxBadge = `<span class="badge badge-neutral" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('statusOriginal')}</span>`;
+        }
+
+        colAuxHtml = `
+          <div class="sub-panel aux-panel">
+            <div class="sub-panel-title">
+              <span>🌐 ${t('cardAuxPanelTitle', { LANG: auxLabel })}</span>
+              ${auxBadge}
+            </div>
+            <div class="diff-box aux-diff-box">${esc(auxText) || `<span style="color:var(--text-muted); font-style:italic;">${t('emptyCell')}</span>`}</div>
+            ${auxText ? `
+            <div class="editor-toolbar" style="margin-top:0.35rem; justify-content:flex-end;">
+              <button class="btn btn-sm btn-outline copy-aux-btn" data-index="${idx}" title="${t('copyAuxTitle')}">
+                📋 ${t('copyAuxBtn')}
+              </button>
+            </div>` : ''}
+          </div>
+        `;
+      }
+
+      // 3. Old version of the target language
+      const col2OldHtml = `
+        <div class="sub-panel">
+          <div class="sub-panel-title">
+            <span>${t('cardTargetOldTitle', { LANG: langLabel })}</span>
+          </div>
+          <div class="diff-box" style="background-color:var(--bg-tertiary); color:var(--text-secondary);">${ComparatorEngine.escapeHtml(stub.targetOld) || `<span style="color:var(--text-muted); font-style:italic;">${t('emptyOriginalText')}</span>`}</div>
+        </div>
+      `;
+
+      // 4. New version of the target language (editor)
+      const col3NewEditorHtml = `
+        <div class="sub-panel">
+          <div class="sub-panel-title">
+            <span>${t('cardTargetNewTitle', { LANG: langLabel })}</span>
+          </div>
+          <textarea class="form-textarea target-textarea" data-index="${idx}" placeholder="${t('textareaPlaceholder')}">${ComparatorEngine.escapeHtml(stub.targetNew)}</textarea>
+          <div class="editor-toolbar">
+            <button class="btn btn-sm btn-primary copy-prompt-btn" data-index="${idx}">
+              ${t('copyPromptBtn')}
+            </button>
+            ${classification === 'MODIFIED' ? `<button class="btn btn-sm btn-outline prefill-old-btn" data-index="${idx}">${t('prefillOldBtn')}</button>` : ''}
+            ${classification === 'ADDED' ? `<button class="btn btn-sm btn-outline prefill-ref-btn" data-index="${idx}">${t('prefillRefBtn')}</button>` : ''}
+          </div>
+        </div>
+      `;
+
+      // 5. Target Diff Live Preview
       const targetDiffHtml = renderTargetDiffHtml(stub);
+
+      const col4DiffHtml = `
+        <div class="sub-panel">
+          <div class="sub-panel-title">
+            <span>${t('cardTargetDiffTitle', { LANG: langLabel })}</span>
+          </div>
+          <div class="diff-box live-target-diff" id="target-diff-${idx}">${targetDiffHtml}</div>
+        </div>
+      `;
 
       // Card Header with optional search highlight
       const rowTitleHtml = highlightQuery(rowTitle, state.searchQuery);
@@ -1414,50 +1544,15 @@
         </div>
       `;
 
-      // Column 2: Old version of the language
-      const col2OldHtml = `
-        <div class="sub-panel">
-          <div class="sub-panel-title">
-            <span>${t('cardTargetOldTitle', { LANG: langLabel })}</span>
-          </div>
-          <div class="diff-box" style="background-color:var(--bg-tertiary); color:var(--text-secondary);">${ComparatorEngine.escapeHtml(stub.targetOld) || `<span style="color:var(--text-muted); font-style:italic;">${t('emptyOriginalText')}</span>`}</div>
-        </div>
-      `;
-
-      // Column 3: New version of the language (editor)
-      const col3NewEditorHtml = `
-        <div class="sub-panel">
-          <div class="sub-panel-title">
-            <span>${t('cardTargetNewTitle', { LANG: langLabel })}</span>
-          </div>
-          <textarea class="form-textarea target-textarea" data-index="${idx}" placeholder="${t('textareaPlaceholder')}">${ComparatorEngine.escapeHtml(stub.targetNew)}</textarea>
-          <div class="editor-toolbar">
-            <button class="btn btn-sm btn-primary copy-prompt-btn" data-index="${idx}">
-              ${t('copyPromptBtn')}
-            </button>
-            ${classification === 'MODIFIED' ? `<button class="btn btn-sm btn-outline prefill-old-btn" data-index="${idx}">${t('prefillOldBtn')}</button>` : ''}
-            ${classification === 'ADDED' ? `<button class="btn btn-sm btn-outline prefill-ref-btn" data-index="${idx}">${t('prefillRefBtn')}</button>` : ''}
-          </div>
-        </div>
-      `;
-
-      // Column 4: Translation Diff (Old Target vs New Target Live Preview)
-      const col4DiffHtml = `
-        <div class="sub-panel">
-          <div class="sub-panel-title">
-            <span>${t('cardTargetDiffTitle', { LANG: langLabel })}</span>
-          </div>
-          <div class="diff-box live-target-diff" id="target-diff-${idx}">${targetDiffHtml}</div>
-        </div>
-      `;
-
-      // Full-Width 4-Columns or 2x2 Layout Grid
-      const gridClass = state.layoutMode === '2x2' ? 'layout-2x2' : 'layout-4cols';
+      // Full-Width 4-Columns or 2x2 Layout Grid (or 5-Columns with aux)
+      const hasAux = !!colAuxHtml;
+      const gridClass = (state.layoutMode === '2x2' ? 'layout-2x2' : 'layout-4cols') + (hasAux ? ' has-aux' : '');
 
       card.innerHTML = `
         ${headerHtml}
         <div class="article-grid ${gridClass}">
           ${col1RefHtml}
+          ${colAuxHtml}
           ${col2OldHtml}
           ${col3NewEditorHtml}
           ${col4DiffHtml}
@@ -1584,6 +1679,25 @@
         }
       });
     });
+
+    // Copy Auxiliary text into the editor
+    elements.articlesContainer.querySelectorAll('.copy-aux-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(btn.getAttribute('data-index'), 10);
+        const auxCol = state.auxiliaryCol;
+        if (!auxCol || !state.translations[auxCol]) return;
+        const auxStub = state.translations[auxCol][idx];
+        const auxText = (auxStub && auxStub.targetNew) ? auxStub.targetNew : (auxStub ? auxStub.targetOld : (state.rows[idx] ? state.rows[idx][auxCol] : ''));
+        if (!auxText) return;
+        const textarea = elements.articlesContainer.querySelector(`.target-textarea[data-index="${idx}"]`);
+        if (textarea) {
+          textarea.value = auxText;
+          stubs[idx].targetNew = auxText;
+          textarea.dispatchEvent(new Event('input', { bubbles: true }));
+          showToast(t('toastAuxCopied'), 'info');
+        }
+      });
+    });
   }
 
   function copyPromptForIndex(idx) {
@@ -1591,10 +1705,20 @@
     const stub = state.translations[col][idx];
     const refDiffRes = ComparatorEngine.computeDiff(stub.refOld, stub.refNew);
 
+    let auxText = '';
+    let auxLangName = '';
+    if (state.auxiliaryCol && state.translations[state.auxiliaryCol]) {
+      const auxStub = state.translations[state.auxiliaryCol][idx];
+      auxText = (auxStub && auxStub.targetNew) ? auxStub.targetNew : (auxStub ? auxStub.targetOld : (state.rows[idx] ? state.rows[idx][state.auxiliaryCol] : ''));
+      auxLangName = languageLabel(state.auxiliaryCol);
+    }
+
     const promptText = ComparatorEngine.buildCopilotPrompt({
       promptLang: I18n.getLanguage(),
       targetLangName: languageLabel(col),
       refLangName: columnDisplayName(state.mappings.refNewCol),
+      auxiliaryLangName: auxLangName,
+      auxiliaryText: auxText,
       rowId: ComparatorEngine.rowTag(state.rowNumbers, idx),
       classification: stub.classification,
       refOld: stub.refOld,
@@ -2006,6 +2130,8 @@
       targetCol: col,
       targetLangName: languageLabel(col),
       refLangName: columnDisplayName(state.mappings.refNewCol),
+      auxiliaryCol: state.auxiliaryCol || '',
+      auxiliaryLangName: state.auxiliaryCol ? languageLabel(state.auxiliaryCol) : '',
       rows: state.rows,
       rowNumbers: state.rowNumbers,
       mappings: state.mappings,
@@ -2468,6 +2594,7 @@
     state.customPromptTemplate = data.customPromptTemplate || null;
     state.pdfTemplate = data.pdfTemplate || null;
     state.activeTargetCol = data.activeTargetCol || state.mappings.targetCols[0] || '';
+    state.auxiliaryCol = (typeof data.auxiliaryCol === 'string') ? data.auxiliaryCol : '';
     elements.sheetOptionsWrapper.style.display = 'none';
     elements.hasHeaderRowCheckbox.checked = state.hasHeaderRow;
 
@@ -2566,6 +2693,7 @@
     initBatchPromptModal();
     initSmartPasteModal();
     initPdfTemplateSettings();
+    initAuxLangSelector();
     initProjectButtons();
     initProjectReset();
 
@@ -2633,6 +2761,7 @@
         initApp: initApp,
         approveUnchangedInActiveLanguage: approveUnchangedInActiveLanguage,
         approveAllUnchangedGlobal: approveAllUnchangedGlobal,
+        updateAuxLangOptions: updateAuxLangOptions,
         openBatchPromptModal: openBatchPromptModal,
         openPdfTemplateModal: openPdfTemplateModal,
         exportManagerialSummary: exportManagerialSummary,

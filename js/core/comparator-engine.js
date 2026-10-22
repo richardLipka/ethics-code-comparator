@@ -386,6 +386,9 @@
     const targetOld = cleanText(params.targetOld);
     const changesSummary = buildChangesSummary(params.diffResult, lang, 10);
 
+    const auxText = cleanText(params.auxiliaryText);
+    const auxLang = params.auxiliaryLangName || '';
+
     // Check if user provided a custom prompt template
     if (params.customTemplate && typeof params.customTemplate === 'string' && params.customTemplate.trim()) {
       const values = {
@@ -396,7 +399,9 @@
         REF_NEW: refNew,
         TARGET_OLD: targetOld,
         CHANGES_SUMMARY: changesSummary,
-        CLASSIFICATION: classification
+        CLASSIFICATION: classification,
+        AUX_LANG: auxLang,
+        AUX_TEXT: auxText
       };
       return params.customTemplate.replace(/\{([A-Z_]+)\}/g, function (all, key) {
         return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : all;
@@ -405,7 +410,7 @@
 
     if (lang === 'en') {
       if (classification === 'ADDED') {
-        return [
+        const lines = [
           'You are an experienced professional translator.',
           'TASK: Translate the new paragraph into language: ' + targetLang + '.',
           'Paragraph: ' + rowId,
@@ -416,10 +421,14 @@
           '',
           '=== NEW REFERENCE TEXT (' + refLang + ') ===',
           refNew
-        ].join('\n');
+        ];
+        if (auxLang && auxText) {
+          lines.push('', '=== AUXILIARY TRANSLATION FOR REFERENCE (' + auxLang + ') ===', auxText);
+        }
+        return lines.join('\n');
       }
 
-      return [
+      const lines = [
         'You are an experienced professional translator.',
         'TASK: Update the approved translation in language ' + targetLang + ' so that it matches the new version of the reference text.',
         'Paragraph: ' + rowId,
@@ -437,12 +446,16 @@
         '',
         '=== 3. CURRENT APPROVED TRANSLATION (' + targetLang + ') ===',
         targetOld
-      ].join('\n');
+      ];
+      if (auxLang && auxText) {
+        lines.push('', '=== 4. AUXILIARY TRANSLATION FOR REFERENCE (' + auxLang + ') ===', auxText);
+      }
+      return lines.join('\n');
     }
 
     // Czech default
     if (classification === 'ADDED') {
-      return [
+      const lines = [
         'Jste zkušený odborný překladatel.',
         'ÚKOL: Přeložte nový odstavec do jazyka: ' + targetLang + '.',
         'Odstavec: ' + rowId,
@@ -453,10 +466,14 @@
         '',
         '=== NOVÝ REFERENČNÍ TEXT (' + refLang + ') ===',
         refNew
-      ].join('\n');
+      ];
+      if (auxLang && auxText) {
+        lines.push('', '=== POMOCNÝ PŘEKLAD PRO POROVNÁNÍ (' + auxLang + ') ===', auxText);
+      }
+      return lines.join('\n');
     }
 
-    return [
+    const lines = [
       'Jste zkušený odborný překladatel.',
       'ÚKOL: Aktualizujte schválený překlad v jazyce ' + targetLang + ' tak, aby odpovídal nové verzi referenčního textu.',
       'Odstavec: ' + rowId,
@@ -474,7 +491,11 @@
       '',
       '=== 3. DOSAVADNÍ SCHVÁLENÝ PŘEKLAD (' + targetLang + ') ===',
       targetOld
-    ].join('\n');
+    ];
+    if (auxLang && auxText) {
+      lines.push('', '=== 4. POMOCNÝ PŘEKLAD PRO POROVNÁNÍ (' + auxLang + ') ===', auxText);
+    }
+    return lines.join('\n');
   }
 
   /**
@@ -856,6 +877,8 @@
       const translations = params.translations || {};
       const targetCol = params.targetCol || params.targetLangName;
       const stubs = (translations && targetCol && translations[targetCol]) ? translations[targetCol] : [];
+      const auxCol = params.auxiliaryCol;
+      const auxStubs = (translations && auxCol && translations[auxCol]) ? translations[auxCol] : [];
 
       rows.forEach(function (row, idx) {
         const stub = stubs[idx];
@@ -864,7 +887,7 @@
         const classification = stub ? stub.classification : classifyRow(refOld, refNew);
 
         if (classification === 'MODIFIED' || classification === 'ADDED') {
-          items.push({
+          const item = {
             index: idx,
             rowId: rowTag(params.rowNumbers, idx),
             classification: classification,
@@ -872,7 +895,11 @@
             refNew: refNew,
             targetOld: stub ? stub.targetOld : (row[targetCol] || ''),
             diffResult: computeDiff(refOld, refNew)
-          });
+          };
+          if (auxCol) {
+            item.auxText = auxStubs[idx] ? (auxStubs[idx].targetNew || auxStubs[idx].targetOld) : (row[auxCol] || '');
+          }
+          items.push(item);
         }
       });
     }
@@ -882,6 +909,8 @@
         ? 'No modified or added paragraphs found to translate.'
         : 'Nebyly nalezeny žádné změněné ani nově přidané odstavce k překladu.';
     }
+
+    const auxLangName = params.auxiliaryLangName || '';
 
     const t = lang === 'en'
       ? {
@@ -897,7 +926,8 @@
         ],
         para: 'PARAGRAPH', added: 'NEWLY ADDED', modified: 'MODIFIED', typ: 'Type',
         newRef: 'NEW REFERENCE TEXT (' + refLang + '):', oldRef: 'OLD REFERENCE TEXT (' + refLang + '):',
-        updRef: 'NEW REFERENCE TEXT:', approved: 'CURRENT APPROVED TRANSLATION (' + targetLang + '):'
+        updRef: 'NEW REFERENCE TEXT:', approved: 'CURRENT APPROVED TRANSLATION (' + targetLang + '):',
+        aux: 'AUXILIARY REFERENCE (' + auxLangName + '):'
       }
       : {
         title: '=== HROMADNÁ AKTUALIZACE PŘEKLADU ===',
@@ -912,7 +942,8 @@
         ],
         para: 'ODSTAVEC', added: 'NOVĚ PŘIDÁNO', modified: 'UPRAVENO', typ: 'Typ',
         newRef: 'NOVÝ REFERENČNÍ TEXT (' + refLang + '):', oldRef: 'PŮVODNÍ REFERENČNÍ TEXT (' + refLang + '):',
-        updRef: 'NOVÝ REFERENČNÍ TEXT:', approved: 'DOSAVADNÍ SCHVÁLENÝ PŘEKLAD (' + targetLang + '):'
+        updRef: 'NOVÝ REFERENČNÍ TEXT:', approved: 'DOSAVADNÍ SCHVÁLENÝ PŘEKLAD (' + targetLang + '):',
+        aux: 'POMOCNÝ PŘEKLAD (' + auxLangName + '):'
       };
 
     const header = [t.title, t.role, t.task, '', t.rulesTitle].concat(t.rules, ['']).join('\n');
@@ -920,17 +951,21 @@
     const body = items.map(function (it, idx) {
       const idTag = it.rowId || ('#' + (idx + 1));
       if (it.classification === 'ADDED') {
-        return [
+        const lines = [
           '----------------------------------------',
           t.para + ': [' + idTag + '] (' + t.typ + ': ' + t.added + ')',
           t.newRef,
-          cleanText(it.refNew),
-          ''
-        ].join('\n');
+          cleanText(it.refNew)
+        ];
+        if (auxLangName && it.auxText && cleanText(it.auxText)) {
+          lines.push(t.aux, cleanText(it.auxText));
+        }
+        lines.push('');
+        return lines.join('\n');
       }
 
       const summary = buildChangesSummary(it.diffResult || computeDiff(it.refOld, it.refNew), lang, 8).replace(/\n/g, ' ');
-      return [
+      const lines = [
         '----------------------------------------',
         t.para + ': [' + idTag + '] (' + t.typ + ': ' + t.modified + ')' + (summary ? ' ' + summary : ''),
         t.oldRef,
@@ -938,9 +973,13 @@
         t.updRef,
         cleanText(it.refNew),
         t.approved,
-        cleanText(it.targetOld),
-        ''
-      ].join('\n');
+        cleanText(it.targetOld)
+      ];
+      if (auxLangName && it.auxText && cleanText(it.auxText)) {
+        lines.push(t.aux, cleanText(it.auxText));
+      }
+      lines.push('');
+      return lines.join('\n');
     }).join('\n');
 
     return header + '\n' + body;

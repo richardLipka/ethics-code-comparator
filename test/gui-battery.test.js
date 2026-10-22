@@ -1190,6 +1190,69 @@ runTest('Modální okna: Escape a klik na pozadí je zavřou', () => {
   assert.ok(!modal.classList.contains('open'));
 });
 
+runTest('Pomocný referenční jazyk: výběr zobrazí 5. sloupec, kopírování do editoru a vložení do promptu', async () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+
+  const auxSelect = document.getElementById('auxLangSelect');
+  assert.ok(auxSelect, 'Selektor pomocného jazyka existuje v panelu nástrojů');
+
+  const options = Array.from(auxSelect.options);
+  assert.ok(options.length >= 2, 'Selektor obsahuje volbu žádný a další jazyky');
+  assert.strictEqual(options[0].value, '', 'První volba je prázdná');
+  assert.ok(!options.some(o => o.value === 'CS 2024'), 'Aktivní cílový jazyk (CS) není nabízen jako pomocný jazyk');
+  assert.ok(options.some(o => o.value === 'EN 2024'), 'Jiné jazyky (např. EN) jsou nabízeny');
+
+  // Výchozí stav karet: bez 5. sloupce
+  const card0 = document.getElementById('article-card-0');
+  const grid0 = card0.querySelector('.article-grid');
+  assert.ok(!grid0.classList.contains('has-aux'), 'Výchozí rozložení nemá třídu has-aux');
+  assert.ok(!card0.querySelector('.aux-panel'), 'Výchozí karta neobsahuje pomocný panel');
+
+  // Výběr pomocného jazyka EN 2024
+  setSelect(window, auxSelect, 'EN 2024');
+  assert.strictEqual(window.__app.state.auxiliaryCol, 'EN 2024', 'Stav aplikace zaznamenal pomocný jazyk');
+
+  const card0After = document.getElementById('article-card-0');
+  const grid0After = card0After.querySelector('.article-grid');
+  assert.ok(grid0After.classList.contains('has-aux'), 'Karta má po výběru pomocného jazyka třídu has-aux');
+
+  const auxPanel = card0After.querySelector('.aux-panel');
+  assert.ok(auxPanel, 'Karta nyní obsahuje pomocný panel');
+  assert.ok(auxPanel.querySelector('.aux-diff-box'), 'Pomocný panel obsahuje textový diff-box');
+  assert.ok(auxPanel.querySelector('.copy-aux-btn'), 'Pomocný panel obsahuje tlačítko pro zkopírování do editoru');
+
+  const auxText = auxPanel.querySelector('.aux-diff-box').textContent;
+  assert.ok(auxText.length > 0, 'Pomocný panel obsahuje text daného odstavce');
+
+  // Kopírování do editoru tlačítkem v panelu
+  const targetTextarea = card0After.querySelector('textarea.target-textarea');
+  const copyAuxBtn = auxPanel.querySelector('.copy-aux-btn');
+  copyAuxBtn.click();
+  assert.strictEqual(targetTextarea.value, auxText, 'Text z pomocného jazyka byl zkopírován do cílového editoru');
+  assert.ok(toastTexts(document).some(t => t.includes('vložen do editoru') || t.includes('inserted into the editor')), 'Toast potvrdil vložení textu');
+
+  // Zkopírování promptu pro Copilot s pomocným jazykem
+  const copyPromptBtn = card0After.querySelector('.copy-prompt-btn');
+  copyPromptBtn.click();
+  await sleep(10);
+  const promptText = window.getLastCopiedText();
+  assert.ok(promptText.includes('POMOCNÝ PŘEKLAD') || promptText.includes('AUXILIARY TRANSLATION'), 'Copilot prompt obsahuje blok pomocného překladu');
+  assert.ok(promptText.includes(auxText.substring(0, 20)), 'Prompt obsahuje text z pomocného jazyka');
+
+  // Přepnutí na záložku EN: pomocný jazyk se automaticky resetuje, protože EN je nově aktivní
+  const enTab = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'))
+    .find(t => t.querySelector('span').textContent === 'EN');
+  enTab.click();
+  assert.strictEqual(window.__app.state.auxiliaryCol, '', 'Při přepnutí na tab pomocného jazyka se výběr resetuje');
+  assert.strictEqual(document.getElementById('auxLangSelect').value, '');
+  assert.ok(!document.getElementById('article-card-0').querySelector('.article-grid').classList.contains('has-aux'));
+
+  const enAuxOptions = Array.from(document.getElementById('auxLangSelect').options);
+  assert.ok(!enAuxOptions.some(o => o.value === 'EN 2024'), 'Nyní v EN tabu není nabízen EN');
+  assert.ok(enAuxOptions.some(o => o.value === 'CS 2024'), 'Naopak CS je nyní nabízen');
+});
+
 // Výsledky
 runAllTests().then(() => {
   console.log('\n========================================');

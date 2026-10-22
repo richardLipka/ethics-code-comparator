@@ -74,6 +74,7 @@
       customPromptTemplate: state.customPromptTemplate,
       pdfTemplate: state.pdfTemplate,
       activeTargetCol: state.activeTargetCol,
+      auxiliaryCol: state.auxiliaryCol || null,
       exportLangCol: state.exportLangCol,
       partialContextCols: state.partialContextCols
     };
@@ -345,6 +346,10 @@
     }
     if (result.customPromptTemplate !== undefined && result.customPromptTemplate !== null && typeof result.customPromptTemplate !== 'string') {
       result.customPromptTemplate = null;
+      invalidSettings = true;
+    }
+    if (result.auxiliaryCol !== undefined && result.auxiliaryCol !== null && typeof result.auxiliaryCol !== 'string') {
+      result.auxiliaryCol = null;
       invalidSettings = true;
     }
     if (result.partialContextCols !== undefined && result.partialContextCols !== null &&

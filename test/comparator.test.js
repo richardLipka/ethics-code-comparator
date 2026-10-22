@@ -186,17 +186,33 @@ runTest('buildCopilotPrompt: anglický prompt a vlastní šablona se zástupným
     customTemplate: '{TARGET_LANG}|{REF_LANG}|{ROW_ID}|{REF_OLD}|{REF_NEW}|{TARGET_OLD}|{UNKNOWN}'
   });
   assert.strictEqual(custom, 'CS|EN|#3|x|y|z|{UNKNOWN}');
+
+  const withAux = ComparatorEngine.buildCopilotPrompt({
+    targetLangName: 'Čeština', refLangName: 'Reference', rowId: '#7', classification: 'MODIFIED',
+    refOld: 'Old text', refNew: 'New text', targetOld: 'Starý text',
+    auxiliaryLangName: 'Polština', auxiliaryText: 'Nowy tekst po polsku.'
+  });
+  assert.ok(withAux.includes('POMOCNÝ PŘEKLAD PRO POROVNÁNÍ (Polština)') && withAux.includes('Nowy tekst po polsku.'));
+
+  const withAuxEn = ComparatorEngine.buildCopilotPrompt({
+    promptLang: 'en', targetLangName: 'Spanish', refLangName: 'Reference', rowId: '#7', classification: 'MODIFIED',
+    refOld: 'Old text', refNew: 'New text', targetOld: 'Texto viejo',
+    auxiliaryLangName: 'French', auxiliaryText: 'Nouveau texte en français.'
+  });
+  assert.ok(withAuxEn.includes('AUXILIARY TRANSLATION FOR REFERENCE (French)') && withAuxEn.includes('Nouveau texte en français.'));
 });
 
-runTest('buildBatchCopilotPrompt: obsahuje jen změněné a nové odstavce se značkami čísel řádků', () => {
+runTest('buildBatchCopilotPrompt: obsahuje jen změněné a nové odstavce se značkami čísel řádků a pomocným jazykem', () => {
   const g = genericTable();
   const stubs = ComparatorEngine.generateTargetStub(g.rows, 'Czech', g.mappings.refOldCol, g.mappings.refNewCol);
   const prompt = ComparatorEngine.buildBatchCopilotPrompt({
     promptLang: 'cs', targetCol: 'Czech', targetLangName: 'Čeština', refLangName: 'Reference new',
+    auxiliaryCol: 'Polish', auxiliaryLangName: 'Polština',
     rows: g.rows, rowNumbers: g.rowNumbers, mappings: g.mappings, translations: { Czech: stubs }
   });
   assert.ok(prompt.includes('ODSTAVEC: [#3] (Typ: UPRAVENO'), 'Upravený odstavec na Excel řádku 3');
   assert.ok(prompt.includes('ODSTAVEC: [#5] (Typ: NOVĚ PŘIDÁNO)'), 'Nový odstavec na Excel řádku 5');
+  assert.ok(prompt.includes('POMOCNÝ PŘEKLAD (Polština):'), 'Hromadný prompt obsahuje sekci pomocného jazyka');
   assert.ok(!prompt.includes('[#2]') && !prompt.includes('[#6]'), 'Nezměněné a zrušené odstavce nejsou v promptu');
   assert.ok(prompt.includes('Čeština') && !/etick|kodex|němč/i.test(prompt));
 
@@ -366,7 +382,7 @@ runTest('StorageManager: uložení a načtení projektu zachová práci, jazyky,
     fileName: 'data.xlsx', activeSheet: 'List1', hasHeaderRow: true, headers: g.headers, rows: g.rows, rowNumbers: g.rowNumbers,
     mappings: g.mappings, translations: { Czech: czech }, customPromptTemplate: 'X {TARGET_LANG}',
     pdfTemplate: { docTitle: 'Dokument', accentColor: '#0d9488' }, activeTargetCol: 'Czech',
-    exportLangCol: 'Polish', partialContextCols: ['Reference new']
+    exportLangCol: 'Polish', partialContextCols: ['Reference new'], auxiliaryCol: 'Polish'
   };
 
   const json = StorageManager.serializeProjectJson(state);
@@ -379,6 +395,7 @@ runTest('StorageManager: uložení a načtení projektu zachová práci, jazyky,
   assert.deepStrictEqual(restored.rowNumbers, g.rowNumbers);
   assert.deepStrictEqual(restored.pdfTemplate, state.pdfTemplate);
   assert.strictEqual(restored.exportLangCol, 'Polish');
+  assert.strictEqual(restored.auxiliaryCol, 'Polish');
   assert.deepStrictEqual(restored.partialContextCols, ['Reference new']);
   const rehydrated = ComparatorEngine.rehydrateStubs(restored.rows, restored.translations.Czech, 'Czech', g.mappings.refOldCol, g.mappings.refNewCol, 'Czech new');
   assert.deepStrictEqual(rehydrated, czech);
