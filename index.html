@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Etický Kodex – Vícejazyčný Porovnávač & Synchronizátor 2024/2026</title>
-  <meta name="description" content="Offline nástroj pro porovnání referenčních verzí Etického kodexu, přípravu stubů nových jazykových mutací a promptů pro LLM Copilot s vizuálním diffem.">
+  <title>Srovnávač verzí & Překladový asistent</title>
+  <meta name="description" content="Offline nástroj pro porovnání staré a nové verze referenčního textu a aktualizaci všech jazykových verzí, s importem a exportem Excelu.">
   <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -12,10 +12,10 @@
   <!-- Top Application Header -->
   <header class="app-header">
     <div class="brand-section">
-      <div class="brand-icon">⚖️</div>
+      <div class="brand-icon">⇄</div>
       <div>
-        <div class="brand-title" data-i18n="appTitle">Etický Kodex – Srovnávač & Překladový Asistent</div>
-        <div class="brand-subtitle" data-i18n="appSubtitle">Synchronizace referenční němčiny (2024 → 2026) a vícejazyčných mutací</div>
+        <div class="brand-title" data-i18n="appTitle">Srovnávač verzí & Překladový asistent</div>
+        <div class="brand-subtitle" data-i18n="appSubtitle" data-i18n-title="appSubtitle">Porovnání staré a nové verze referenčního textu a aktualizace všech jazykových verzí</div>
       </div>
       <span class="security-badge" data-i18n="securityBadge" data-i18n-title="securityTooltip">
         🔒 100% Offline & Bezpečné
@@ -29,22 +29,27 @@
         <span id="saveStatusText" data-i18n="saveStatusSaved">Vše uloženo</span>
       </div>
 
+      <!-- Project file: available in every step -->
+      <button class="btn btn-primary btn-sm" id="saveProjectBtn" data-i18n="saveProjectBtn" data-i18n-title="saveProjectTitle">
+        💾 Uložit projekt
+      </button>
+      <button class="btn btn-outline btn-sm" id="loadProjectBtn" data-i18n="loadProjectBtn" data-i18n-title="loadProjectTitle">
+        📂 Načíst projekt
+      </button>
+      <input type="file" id="projectFileInput" accept=".json,application/json" style="display:none;">
+
       <!-- Language Switcher (CZ / EN) -->
       <button class="btn btn-outline btn-sm" id="langToggleBtn" style="font-weight:700;">
         🇬🇧 English
       </button>
-      <button class="btn btn-outline btn-sm" id="diagnosticsBtn" data-i18n="diagnosticsBtn">
-        🧪 Diagnostika a testy
-      </button>
+      <button class="btn btn-outline btn-sm" id="diagnosticsBtn" data-i18n="diagnosticsBtn" data-i18n-title="diagnosticsTitle" aria-label="Diagnostika">🧪</button>
       <button class="btn btn-outline btn-sm" id="settingsPromptBtn" data-i18n="promptSettingsBtn">
         ⚙️ Šablona promptu
       </button>
       <button class="btn btn-outline btn-sm" id="resetProjectBtn" data-i18n="resetProjectBtn">
         ↺ Nový projekt
       </button>
-      <button class="btn btn-outline btn-sm" id="themeToggleBtn">
-        🌙 Tmavý režim
-      </button>
+      <button class="btn btn-outline btn-sm" id="themeToggleBtn" data-i18n-title="themeToggleTitle" aria-label="Tmavý / světlý režim">🌙</button>
     </div>
   </header>
 
@@ -79,7 +84,7 @@
         <div class="card-header">
           <div>
             <h1 class="card-title" data-i18n="step1Title">Krok 1: Nahrání Excel tabulky a označení sloupců</h1>
-            <p class="card-desc" data-i18n="step1Desc">Nahrajte sešit s referenčními verzemi (DE 2024 a DE 2026) a dosavadními jazykovými překlady.</p>
+            <p class="card-desc" data-i18n="step1Desc">Nahrajte sešit se starou a novou verzí referenčního textu a dosavadními verzemi ostatních jazyků.</p>
           </div>
         </div>
 
@@ -94,55 +99,64 @@
         <!-- Demo & Backup Action Bar -->
         <div class="demo-action-bar">
           <button class="btn btn-primary" id="loadSampleBtn" data-i18n="loadSampleBtn">
-            🚀 Vyzkoušet na ukázkovém kodexu (15 článků, 12 jazyků)
+            🚀 Vyzkoušet na ukázkových datech
           </button>
           <button class="btn btn-secondary" id="downloadSampleBtn" data-i18n="downloadSampleBtn">
-            📥 Stáhnout vzorový soubor (Demo XLSX)
+            📥 Stáhnout ukázkový soubor (.xlsx)
           </button>
-          <button class="btn btn-outline" id="importProjectBtn" data-i18n="importProjectBtn">
-            📂 Načíst rozpracovaný projekt (.json)
-          </button>
-          <input type="file" id="projectFileInput" accept=".json" style="display:none;">
         </div>
 
-        <!-- Sheet Selector (if multiple sheets) -->
-        <div id="sheetSelectWrapper" style="display:none; margin-top:1.25rem;">
-          <label class="mapping-label" for="sheetSelect" data-i18n="sheetSelectLabel">Vyberte list sešitu k analýze:</label>
-          <select id="sheetSelect" class="form-select"></select>
+        <!-- Sheet Selector and header-row option -->
+        <div id="sheetOptionsWrapper" class="sheet-options" style="display:none;">
+          <div id="sheetSelectWrapper" style="display:none;">
+            <label class="mapping-label" for="sheetSelect" data-i18n="sheetSelectLabel">List sešitu:</label>
+            <select id="sheetSelect" class="form-select"></select>
+          </div>
+          <label class="checkbox-label">
+            <input type="checkbox" id="hasHeaderRowCheckbox" checked>
+            <span data-i18n="hasHeaderRowLabel">První řádek obsahuje názvy sloupců</span>
+          </label>
         </div>
 
         <!-- Column Mapping Container -->
         <div id="mappingContainer" style="display:none; margin-top:1.5rem;">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.75rem; flex-wrap:wrap; gap:0.5rem;">
-            <h2 style="font-size:1rem; font-weight:700; color:var(--text-heading);" data-i18n="mappingTitle">Označení referenčních sloupců a cílových jazyků</h2>
-            <button class="btn btn-outline btn-sm" id="autoDetectMappingBtn" data-i18n="autoDetectBtn">
-              🔍 Automaticky detekovat sloupce
-            </button>
-          </div>
+          <h2 style="font-size:1rem; font-weight:700; color:var(--text-heading); margin-bottom:0.75rem;" data-i18n="mappingTitle">Výběr sloupců</h2>
 
           <div class="mapping-grid">
             <div class="mapping-card">
-              <label class="mapping-label" for="refOldSelect" data-i18n="refOldLabel">1. Referenční sloupec 2024 (Stará němčina):</label>
+              <label class="mapping-label" for="refOldSelect" data-i18n="refOldLabel">1. Reference – stará verze:</label>
               <select id="refOldSelect" class="form-select"></select>
-              <small style="color:var(--text-muted); display:block; margin-top:0.35rem;" data-i18n="refOldHelp">Slouží k porovnání se starými jazykovými mutacemi.</small>
+              <small style="color:var(--text-muted); display:block; margin-top:0.35rem;" data-i18n="refOldHelp"></small>
             </div>
 
             <div class="mapping-card">
-              <label class="mapping-label" for="refNewSelect" data-i18n="refNewLabel">2. Referenční sloupec 2026 (Nová němčina):</label>
+              <label class="mapping-label" for="refNewSelect" data-i18n="refNewLabel">2. Reference – nová verze:</label>
               <select id="refNewSelect" class="form-select"></select>
-              <small style="color:var(--text-muted); display:block; margin-top:0.35rem;" data-i18n="refNewHelp">Slouží k detekci změn, nových a smazaných odstavců.</small>
+              <small style="color:var(--text-muted); display:block; margin-top:0.35rem;" data-i18n="refNewHelp"></small>
             </div>
 
             <div class="mapping-card" style="grid-column: 1 / -1;">
-              <label class="mapping-label" data-i18n="targetColsLabel">3. Cílové jazykové mutace k překladu (Verze 2024):</label>
-              <small style="color:var(--text-muted); display:block; margin-bottom:0.5rem;" data-i18n="targetColsHelp">Zaškrtněte všechny sloupce s existujícími ověřenými překlady, pro které chcete sestavit novou verzi 2026.</small>
-              <div id="targetColsContainer" class="target-langs-selector"></div>
+              <label class="mapping-label" data-i18n="targetColsLabel">3. Jazyky k aktualizaci:</label>
+              <small style="color:var(--text-muted); display:block; margin-bottom:0.5rem;" data-i18n="targetColsHelp"></small>
+              <div style="overflow-x:auto;">
+                <table class="language-table">
+                  <thead>
+                    <tr>
+                      <th data-i18n="thUse">Použít</th>
+                      <th data-i18n="thColumn">Sloupec (stará verze)</th>
+                      <th data-i18n="thLanguage">Název jazyka</th>
+                      <th data-i18n="thNewVersion">Sloupec pro novou verzi</th>
+                    </tr>
+                  </thead>
+                  <tbody id="languagesTableBody"></tbody>
+                </table>
+              </div>
             </div>
           </div>
 
           <div style="margin-top:1.5rem; text-align:right;">
             <button class="btn btn-primary" id="confirmMappingBtn" style="padding:0.75rem 1.75rem; font-size:1rem;" data-i18n="confirmMappingBtn">
-              Pokračovat na přehled změn referenční verze →
+              Pokračovat na přehled změn →
             </button>
           </div>
         </div>
@@ -172,7 +186,7 @@
       <div class="card">
         <div class="card-header">
           <div>
-            <h1 class="card-title" data-i18n="step2Title">Krok 2: Přehled změn v německé referenční verzi (2024 vs 2026)</h1>
+            <h1 class="card-title" data-i18n="step2Title">Krok 2: Změny v referenčním textu (stará → nová verze)</h1>
             <p class="card-desc" data-i18n="step2Desc">Automatická detekce odstavců: beze změny, upraveno, nově přidáno a odstraněno.</p>
           </div>
           <button class="btn btn-primary" id="goToTranslationBtn" data-i18n="goToTranslationBtn">
@@ -208,7 +222,7 @@
         <div class="mgr-summary-bar">
           <div class="mgr-summary-title">
             <span>📋</span>
-            <strong data-i18n="mgrReportTitle">Manažerské shrnutí změn (Change Log 2024 → 2026):</strong>
+            <strong data-i18n="step2MgrTitle">Shrnutí změn reference:</strong>
           </div>
           <div class="mgr-summary-actions">
             <button class="btn btn-outline btn-sm" id="step2ExportMdBtn" data-i18n="btnExportMd">📝 Markdown (.md)</button>
@@ -224,7 +238,7 @@
               <tr style="border-bottom:2px solid var(--border-color); text-align:left; color:var(--text-secondary);">
                 <th style="padding:0.75rem; width:160px;" data-i18n="thArticle">Článek / ID</th>
                 <th style="padding:0.75rem; width:130px;" data-i18n="thClassification">Klasifikace</th>
-                <th style="padding:0.75rem;" data-i18n="thDiff">Znění v němčině & Zvýrazněný textový diff (2024 → 2026)</th>
+                <th style="padding:0.75rem;" data-i18n="thDiff">Referenční text se zvýrazněnými změnami (stará → nová verze)</th>
               </tr>
             </thead>
             <tbody id="refDiffTableBody"></tbody>
@@ -326,119 +340,92 @@
       <div class="card">
         <div class="card-header">
           <div>
-            <h1 class="card-title" data-i18n="step4Title">Krok 4: Export hotového Excel sešitu a záloha projektu</h1>
-            <p class="card-desc" data-i18n="step4Desc">Vyberte preferovanou formu výstupu – kompletní srovnávací tabulku se všemi sloupci nebo čistou finální verzi 2026.</p>
+            <h1 class="card-title" data-i18n="step4Title">Krok 4: Export výsledků</h1>
+            <p class="card-desc" data-i18n="step4Desc"></p>
           </div>
         </div>
 
+        <!-- Language used by the document, the change summary and the partial workbook -->
+        <div class="export-lang-bar">
+          <label class="mapping-label" for="pdfLangSelect" data-i18n="exportLangLabel">Jazyk pro dokument, shrnutí změn a částečný export:</label>
+          <select id="pdfLangSelect" class="form-select"></select>
+        </div>
+
         <div class="export-grid">
-          <!-- Option A: Comprehensive Workbook -->
+          <!-- Full workbook -->
           <div class="export-card">
             <div>
-              <div style="font-size:2rem; margin-bottom:0.5rem;">📊</div>
-              <h2 style="font-size:1.15rem; font-weight:700; color:var(--text-heading); margin-bottom:0.5rem;" data-i18n="comprehensiveTitle">
-                Kompletní srovnávací sešit (2024 + 2026)
-              </h2>
-              <p style="font-size:0.875rem; color:var(--text-secondary); line-height:1.5;" data-i18n="comprehensiveDesc">
-                Zachová všechny původní sloupce i řádky a vedle každého jazyka z roku 2024 vloží nový sloupec s verzí 2026. Ideální pro archivaci, audit a interní schvalování změn.
-              </p>
+              <div class="export-icon">📊</div>
+              <h2 class="export-title" data-i18n="comprehensiveTitle">Kompletní sešit (stará + nová verze)</h2>
+              <p class="export-desc" data-i18n="comprehensiveDesc"></p>
             </div>
-            <button class="btn btn-primary" id="downloadComprehensiveBtn" data-i18n="comprehensiveBtn">
-              📥 Stáhnout kompletní sešit (.xlsx)
-            </button>
+            <button class="btn btn-primary" id="downloadComprehensiveBtn" data-i18n="comprehensiveBtn">📥 Stáhnout kompletní sešit (.xlsx)</button>
           </div>
 
-          <!-- Option B: Clean 2026 Final Version -->
+          <!-- New version only -->
           <div class="export-card">
             <div>
-              <div style="font-size:2rem; margin-bottom:0.5rem;">✨</div>
-              <h2 style="font-size:1.15rem; font-weight:700; color:var(--text-heading); margin-bottom:0.5rem;" data-i18n="cleanTitle">
-                Čistá nová verze 2026 (Finální publikace)
-              </h2>
-              <p style="font-size:0.875rem; color:var(--text-secondary); line-height:1.5;" data-i18n="cleanDesc">
-                Vygeneruje čistou tabulku obsahující výhradně platné články pro rok 2026 ve všech jazycích. Odstraněné články jsou automaticky vynechány.
-              </p>
+              <div class="export-icon">✨</div>
+              <h2 class="export-title" data-i18n="cleanTitle">Pouze nová verze</h2>
+              <p class="export-desc" data-i18n="cleanDesc"></p>
             </div>
-            <button class="btn btn-success" id="downloadCleanBtn" data-i18n="cleanBtn">
-              📥 Stáhnout čistou verzi 2026 (.xlsx)
-            </button>
+            <button class="btn btn-success" id="downloadCleanBtn" data-i18n="cleanBtn">📥 Stáhnout novou verzi (.xlsx)</button>
           </div>
 
-          <!-- Option C: Project JSON Backup -->
-          <div class="export-card">
+          <!-- Partial workbook for the selected language -->
+          <div class="export-card export-card-accent">
             <div>
-              <div style="font-size:2rem; margin-bottom:0.5rem;">💾</div>
-              <h2 style="font-size:1.15rem; font-weight:700; color:var(--text-heading); margin-bottom:0.5rem;" data-i18n="backupTitle">
-                Záložní soubor projektu (.json)
-              </h2>
-              <p style="font-size:0.875rem; color:var(--text-secondary); line-height:1.5;" data-i18n="backupDesc">
-                Uloží kompletní stav vaší práce včetně všech rozpracovaných textů a mapování do jednoho souboru, který můžete kdykoliv znovu načíst.
-              </p>
+              <div class="export-icon">🧩</div>
+              <h2 class="export-title" data-i18n="partialTitle">Částečný sešit pro jeden jazyk</h2>
+              <p class="export-desc" data-i18n="partialDesc"></p>
+              <label class="mapping-label" data-i18n="partialContextLabel">Referenční sloupce v exportu:</label>
+              <div id="partialContextContainer" class="partial-context-list"></div>
             </div>
-            <button class="btn btn-outline" id="exportProjectJsonBtn" data-i18n="backupBtn">
-              💾 Exportovat projekt (.json)
-            </button>
+            <button class="btn btn-primary" id="downloadPartialBtn" data-i18n="partialBtn">📥 Stáhnout částečný sešit (.xlsx)</button>
           </div>
 
-          <!-- Option D: Formatted PDF Export Per Language -->
-          <div class="export-card" style="border: 1px solid var(--accent-primary); box-shadow: var(--shadow-md);">
+          <!-- Printable document -->
+          <div class="export-card export-card-accent">
             <div>
-              <div style="font-size:2rem; margin-bottom:0.5rem;">📄</div>
-              <h2 style="font-size:1.15rem; font-weight:700; color:var(--text-heading); margin-bottom:0.5rem;" data-i18n="pdfTitle">
-                Formátované PDF dokumenty (pro každý jazyk)
-              </h2>
-              <p style="font-size:0.875rem; color:var(--text-secondary); line-height:1.5; margin-bottom:0.75rem;" data-i18n="pdfDesc">
-                Vygeneruje reprezentativní, graficky upravený dokument kodexu pro rok 2026 s formátováním pro A4, záhlavím, číslováním a podpisovým blokem.
-              </p>
-              <label style="display:block; font-size:0.8rem; font-weight:700; color:var(--text-muted); margin-bottom:0.35rem;" data-i18n="pdfSelectLang">
-                Vyberte jazykovou mutaci pro PDF:
-              </label>
-              <select id="pdfLangSelect" class="form-select" style="margin-bottom:0.85rem; font-weight:600;"></select>
+              <div class="export-icon">📄</div>
+              <h2 class="export-title" data-i18n="pdfTitle">Dokument pro tisk / PDF</h2>
+              <p class="export-desc" data-i18n="pdfDesc"></p>
             </div>
             <div style="display:flex; flex-direction:column; gap:0.5rem;">
-              <button class="btn btn-primary" id="printPdfBtn" data-i18n="pdfPrintBtn">
-                🖨️ Otevřít tisk / Uložit do PDF
-              </button>
+              <button class="btn btn-primary" id="printPdfBtn" data-i18n="pdfPrintBtn">🖨️ Otevřít tisk / Uložit do PDF</button>
               <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
-                <button class="btn btn-outline btn-sm" id="downloadPdfHtmlBtn" style="flex:1 1 auto;" data-i18n="pdfDownloadHtmlBtn">
-                  📥 Stáhnout HTML
-                </button>
-                <button class="btn btn-secondary btn-sm" id="printAllPdfBtn" style="flex:1 1 auto;" data-i18n="pdfAllBtn">
-                  📑 Všechny jazyky
-                </button>
+                <button class="btn btn-outline btn-sm" id="downloadPdfHtmlBtn" style="flex:1 1 auto;" data-i18n="pdfDownloadHtmlBtn">📥 Stáhnout HTML</button>
+                <button class="btn btn-secondary btn-sm" id="printAllPdfBtn" style="flex:1 1 auto;" data-i18n="pdfAllBtn">📑 Tisk všech jazyků</button>
               </div>
-              <button class="btn btn-outline btn-sm" id="editPdfTemplateBtn" style="margin-top:0.25rem;" data-i18n="editPdfTemplateBtn">
-                ⚙️ Upravit šablonu & hlavičku PDF
-              </button>
+              <button class="btn btn-outline btn-sm" id="editPdfTemplateBtn" data-i18n="editPdfTemplateBtn">⚙️ Upravit hlavičku dokumentu</button>
             </div>
           </div>
 
-          <!-- Option E: Managerial Change Log Report -->
-          <div class="export-card" style="border: 1px solid #3b82f6; box-shadow: var(--shadow-md);">
+          <!-- Change summary of the selected language -->
+          <div class="export-card export-card-accent">
             <div>
-              <div style="font-size:2rem; margin-bottom:0.5rem;">📋</div>
-              <h2 style="font-size:1.15rem; font-weight:700; color:var(--text-heading); margin-bottom:0.5rem;" data-i18n="mgrReportTitle">
-                Manažerské shrnutí změn (Change Log)
-              </h2>
-              <p style="font-size:0.875rem; color:var(--text-secondary); line-height:1.5; margin-bottom:0.75rem;" data-i18n="mgrReportDesc">
-                Oficiální auditní a manažerský report s KPI statistikou, přehledem změn a detailními rozdíly mezi lety 2024 a 2026.
-              </p>
+              <div class="export-icon">📋</div>
+              <h2 class="export-title" data-i18n="mgrReportTitle">Shrnutí změn (vybraný jazyk)</h2>
+              <p class="export-desc" data-i18n="mgrReportDesc"></p>
             </div>
             <div style="display:flex; flex-direction:column; gap:0.5rem;">
               <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
-                <button class="btn btn-outline btn-sm" id="downloadMgrMdBtn" style="flex:1 1 auto;" data-i18n="btnExportMd">
-                  📝 Markdown (.md)
-                </button>
-                <button class="btn btn-outline btn-sm" id="downloadMgrDocBtn" style="flex:1 1 auto;" data-i18n="btnExportDoc">
-                  📄 Word (.doc)
-                </button>
+                <button class="btn btn-outline btn-sm" id="downloadMgrMdBtn" style="flex:1 1 auto;" data-i18n="btnExportMd">📝 Markdown (.md)</button>
+                <button class="btn btn-outline btn-sm" id="downloadMgrDocBtn" style="flex:1 1 auto;" data-i18n="btnExportDoc">📄 Word (.doc)</button>
               </div>
-              <button class="btn btn-primary btn-sm" id="printMgrPdfBtn" data-i18n="btnExportPdf">
-                🖨️ Vytisknout / Uložit PDF
-              </button>
+              <button class="btn btn-primary btn-sm" id="printMgrPdfBtn" data-i18n="btnExportPdf">🖨️ Tisk / PDF</button>
             </div>
           </div>
 
+          <!-- Project file -->
+          <div class="export-card">
+            <div>
+              <div class="export-icon">💾</div>
+              <h2 class="export-title" data-i18n="backupTitle">Soubor projektu (.json)</h2>
+              <p class="export-desc" data-i18n="backupDesc"></p>
+            </div>
+            <button class="btn btn-outline" id="exportProjectJsonBtn" data-i18n="backupBtn">💾 Uložit projekt (.json)</button>
+          </div>
         </div>
 
       </div>
@@ -514,15 +501,15 @@
       </div>
       <div class="modal-body">
         <p style="font-size:0.875rem; color:var(--text-secondary); margin-bottom:0.75rem;" data-i18n="smartPasteDesc">
-          Vložte text odpovědi z Copilota. Systém automaticky detekuje čísla článků ([Art. 04], Art. 04: atd.) a přiřadí je.
+          Vložte odpověď z Copilota. Odstavce se přiřadí podle značek řádků ([#12], Řádek 12: apod.).
         </p>
         <textarea id="smartPasteInput" class="form-textarea" style="min-height:200px; font-family:var(--font-mono); font-size:0.825rem;" placeholder="Vložte sem celou odpověď od Copilota..." data-i18n-placeholder="smartPastePlaceholder"></textarea>
         
         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:0.75rem;">
-          <button class="btn btn-secondary btn-sm" id="smartPasteParseBtn" data-i18n="smartPasteParseBtn">🔍 Analyzovat a spárovat články</button>
+          <button class="btn btn-secondary btn-sm" id="smartPasteParseBtn" data-i18n="smartPasteParseBtn">🔍 Analyzovat a spárovat</button>
           <label style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.825rem; font-weight:600; cursor:pointer;">
             <input type="checkbox" id="smartPasteAutoVerifyCheckbox" checked style="accent-color:#10b981; width:15px; height:15px;">
-            <span data-i18n="smartPasteAutoVerify">Označit vložené články jako ověřené / schválené</span>
+            <span data-i18n="smartPasteAutoVerify">Zároveň označit vložené odstavce jako schválené</span>
           </label>
         </div>
 
@@ -533,7 +520,7 @@
       </div>
       <div class="modal-footer">
         <button class="btn btn-outline" id="closeSmartPasteFooterBtn">Zavřít</button>
-        <button class="btn btn-primary" id="smartPasteApplyBtn" data-i18n="smartPasteApplyBtn" disabled>✓ Aplikovat na vybrané články</button>
+        <button class="btn btn-primary" id="smartPasteApplyBtn" data-i18n="smartPasteApplyBtn" disabled>✓ Vložit spárované odstavce</button>
       </div>
     </div>
   </div>
@@ -557,14 +544,14 @@
           </div>
           <div>
             <label class="mapping-label" for="tplEffectiveDate" data-i18n="lblEffectiveDate">Datum účinnosti:</label>
-            <input type="text" id="tplEffectiveDate" class="form-input" placeholder="např. 1. ledna 2026">
+            <input type="text" id="tplEffectiveDate" class="form-input" placeholder="např. Platné od 1. 1. 2027">
           </div>
         </div>
 
         <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.75rem; margin-bottom:0.75rem;">
           <div>
             <label class="mapping-label" for="tplDocTitle" data-i18n="lblDocTitle">Hlavní název dokumentu:</label>
-            <input type="text" id="tplDocTitle" class="form-input" placeholder="ETICKÝ KODEX A PRAVIDLA CHOVÁNÍ 2026">
+            <input type="text" id="tplDocTitle" class="form-input" placeholder="Název dokumentu">
           </div>
           <div>
             <label class="mapping-label" for="tplAccentColor" data-i18n="lblAccentColor">Hlavní barva akcentu (HEX):</label>

@@ -1,7 +1,7 @@
 {
   "name": "ethics-code-comparator",
-  "version": "1.1.0",
-  "description": "Offline browser app for comparing reference versions of a Code of Ethics (DE 2024 vs 2026) and updating its translations, with Excel import/export.",
+  "version": "1.2.0",
+  "description": "Offline browser app that compares the old and new version of a reference text and helps update all its language versions, with Excel import/export.",
   "homepage": "https://richardlipka.github.io/ethics-code-comparator/",
   "repository": {
     "type": "git",

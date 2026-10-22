@@ -1,5 +1,5 @@
 /**
- * Application Controller - Code of Ethics Multi-Language Comparator
+ * Application Controller - multi-language version comparator and translation assistant.
  * Bilingual (Czech & English), Full-width 4-column comparison layout, 100% offline.
  */
 
@@ -13,13 +13,18 @@
     fileName: '',
     sheetNames: [],
     activeSheet: '',
+    hasHeaderRow: true,
     headers: [],
     rows: [],
+    rowNumbers: [], // Excel row number of every data row
     mappings: {
       refOldCol: '',
       refNewCol: '',
-      targetCols: []
+      targetCols: [], // old-version columns of the languages to update
+      languages: {} // { [oldCol]: { label, newCol, newColName } }
     },
+    exportLangCol: '',
+    partialContextCols: null,
     // Translations map: { [targetCol]: [ { rowIndex, targetNew, status, isVerified, notes } ] }
     translations: {},
     activeTargetCol: '',
@@ -49,7 +54,8 @@
     dropzone: document.getElementById('dropzone'),
     fileInput: document.getElementById('fileInput'),
     projectFileInput: document.getElementById('projectFileInput'),
-    importProjectBtn: document.getElementById('importProjectBtn'),
+    saveProjectBtn: document.getElementById('saveProjectBtn'),
+    loadProjectBtn: document.getElementById('loadProjectBtn'),
     
     // Steps Containers
     step1Section: document.getElementById('step1Section'),
@@ -64,14 +70,15 @@
     stepNav4: document.getElementById('stepNav4'),
     
     // Step 1 Controls
+    sheetOptionsWrapper: document.getElementById('sheetOptionsWrapper'),
     sheetSelectWrapper: document.getElementById('sheetSelectWrapper'),
     sheetSelect: document.getElementById('sheetSelect'),
+    hasHeaderRowCheckbox: document.getElementById('hasHeaderRowCheckbox'),
     mappingContainer: document.getElementById('mappingContainer'),
     refOldSelect: document.getElementById('refOldSelect'),
     refNewSelect: document.getElementById('refNewSelect'),
-    targetColsContainer: document.getElementById('targetColsContainer'),
+    languagesTableBody: document.getElementById('languagesTableBody'),
     confirmMappingBtn: document.getElementById('confirmMappingBtn'),
-    autoDetectMappingBtn: document.getElementById('autoDetectMappingBtn'),
     dataPreviewContainer: document.getElementById('dataPreviewContainer'),
     previewTableHead: document.getElementById('previewTableHead'),
     previewTableBody: document.getElementById('previewTableBody'),
@@ -110,6 +117,8 @@
     // Step 4 Controls
     downloadComprehensiveBtn: document.getElementById('downloadComprehensiveBtn'),
     downloadCleanBtn: document.getElementById('downloadCleanBtn'),
+    downloadPartialBtn: document.getElementById('downloadPartialBtn'),
+    partialContextContainer: document.getElementById('partialContextContainer'),
     exportProjectJsonBtn: document.getElementById('exportProjectJsonBtn'),
     pdfLangSelect: document.getElementById('pdfLangSelect'),
     printPdfBtn: document.getElementById('printPdfBtn'),
@@ -256,6 +265,7 @@
       
       // Re-render active screens to update dynamic labels
       if (state.currentStep === 1) {
+        if (state.rows.length > 0) renderColumnMappingControls();
         renderDataPreview();
       } else if (state.currentStep === 2) {
         renderReferenceOverview();
@@ -441,6 +451,13 @@
       loadSheet(elements.sheetSelect.value);
     });
 
+    // Re-read the sheet when the user says the first row is (not) a header
+    elements.hasHeaderRowCheckbox.addEventListener('change', function () {
+      if (state.workbook && state.activeSheet) {
+        loadSheet(state.activeSheet);
+      }
+    });
+
     // Sample data button
     elements.loadSampleBtn.addEventListener('click', function () {
       loadSampleDemo();
@@ -450,9 +467,17 @@
     elements.downloadSampleBtn.addEventListener('click', function () {
       downloadSampleExcelFile();
     });
+  }
 
-    // Project JSON Import/Export
-    elements.importProjectBtn.addEventListener('click', function () {
+  /**
+   * Project file buttons in the page header (available in every step)
+   */
+  function initProjectButtons() {
+    elements.saveProjectBtn.addEventListener('click', function () {
+      exportProjectFile();
+    });
+
+    elements.loadProjectBtn.addEventListener('click', function () {
       elements.projectFileInput.click();
     });
 
@@ -488,9 +513,11 @@
    * must never be matched to the rows of a new one).
    */
   function resetWorkspaceForNewTable() {
-    state.mappings = { refOldCol: '', refNewCol: '', targetCols: [] };
+    state.mappings = { refOldCol: '', refNewCol: '', targetCols: [], languages: {} };
     state.translations = {};
     state.activeTargetCol = '';
+    state.exportLangCol = '';
+    state.partialContextCols = null;
     state.filterStatus = 'all';
     state.searchQuery = '';
     if (elements.searchInput) elements.searchInput.value = '';
@@ -530,6 +557,7 @@
           elements.sheetSelect.appendChild(opt);
         });
 
+        elements.sheetOptionsWrapper.style.display = 'flex';
         elements.sheetSelectWrapper.style.display = state.sheetNames.length > 1 ? 'block' : 'none';
         if (loadSheet(state.sheetNames[0])) {
           showToast(t('toastFileLoaded', { NAME: file.name }), 'success');
@@ -550,28 +578,66 @@
     }
   }
 
+  // Cells often carry stray spaces or line breaks around the text (a cell may even look empty
+  // in a narrow preview), so text is trimmed on import
+  function trimCell(value) {
+    return typeof value === 'string' ? value.trim() : (value === undefined || value === null ? '' : value);
+  }
+
   function loadSheet(sheetName) {
     const sheet = state.workbook.Sheets[sheetName];
-    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    const hasHeader = elements.hasHeaderRowCheckbox.checked;
+    const range = sheet && sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null;
+    const rawRows = range
+      ? XLSX.utils.sheet_to_json(sheet, hasHeader ? { defval: '' } : { header: 'A', defval: '' })
+      : [];
 
-    if (!rows || rows.length === 0) {
+    if (!rawRows || rawRows.length === 0) {
       alert(t('alertEmptySheet'));
       return false;
     }
 
+    const letters = [];
+    for (let c = range.s.c; c <= range.e.c; c++) letters.push(XLSX.utils.encode_col(c));
+
+    let headers;
+    const columnLetters = {};
+    if (hasHeader) {
+      // Header order of the sheet itself (Object.keys would move numeric headers first)
+      const headerRow = XLSX.utils.sheet_to_json(sheet, { header: 1, range: range.s.r, defval: '' })[0] || [];
+      const keys = Object.keys(rawRows[0]);
+      const ordered = [];
+      headerRow.forEach(function (h, i) {
+        const key = keys.find(function (k) { return k === String(h); }) ||
+          keys.find(function (k) { return /^__EMPTY/.test(k) && ordered.indexOf(k) === -1; });
+        if (key !== undefined && ordered.indexOf(key) === -1) {
+          ordered.push(key);
+          columnLetters[key] = letters[i];
+        }
+      });
+      headers = ordered.length === keys.length ? ordered : keys;
+    } else {
+      headers = letters;
+      letters.forEach(function (l) { columnLetters[l] = l; });
+    }
+
     state.activeSheet = sheetName;
+    state.hasHeaderRow = hasHeader;
     elements.sheetSelect.value = sheetName;
-    state.rows = rows;
-    // Header order of the sheet itself (Object.keys would move numeric headers first)
-    const headerRow = XLSX.utils.sheet_to_json(sheet, { header: 1, range: 0 })[0] || [];
-    const keys = Object.keys(rows[0]);
-    const ordered = headerRow.map(function (h, i) { return keys.find(function (k) { return k === String(h); }) || keys[i]; })
-      .filter(function (k, i, arr) { return k !== undefined && arr.indexOf(k) === i; });
-    state.headers = ordered.length === keys.length ? ordered : keys;
+    state.headers = headers;
+    state.columnLetters = columnLetters;
+    state.rowNumbers = rawRows.map(function (r, i) {
+      return typeof r.__rowNum__ === 'number' ? r.__rowNum__ + 1 : i + (hasHeader ? 2 : 1);
+    });
+    state.rows = rawRows.map(function (r) {
+      const row = {};
+      headers.forEach(function (h) { row[h] = trimCell(r[h]); });
+      return row;
+    });
     resetWorkspaceForNewTable();
+    selectDefaultLanguageColumns();
 
     renderColumnMappingControls();
-    autoDetectColumnMappings();
     renderDataPreview();
     revealMapping();
     persistState(300);
@@ -586,30 +652,49 @@
   }
 
   function loadSampleDemo() {
-    state.fileName = 'vzorec_eticky_kodex_2024_2026.xlsx';
+    state.fileName = 'ukazkovy_dokument.xlsx';
     state.workbook = null;
+    state.hasHeaderRow = true;
     state.rows = SampleGenerator.getSampleData();
     state.headers = SampleGenerator.getSampleHeaders();
-    state.sheetNames = ['Eticky_Kodex'];
-    state.activeSheet = 'Eticky_Kodex';
+    state.rowNumbers = state.rows.map(function (r, idx) { return idx + 2; });
+    state.columnLetters = {};
+    state.sheetNames = ['Data'];
+    state.activeSheet = 'Data';
     resetWorkspaceForNewTable();
 
-    elements.sheetSelectWrapper.style.display = 'none';
+    elements.sheetOptionsWrapper.style.display = 'none';
 
     const sampleDefaults = SampleGenerator.getSampleDefaultMappings();
     state.mappings.refOldCol = sampleDefaults.refOldCol;
     state.mappings.refNewCol = sampleDefaults.refNewCol;
-    state.mappings.targetCols = sampleDefaults.targetCols.slice();
+    sampleDefaults.targetCols.forEach(function (col) { setLanguageUsed(col, true); });
 
     renderColumnMappingControls();
-
-    elements.refOldSelect.value = state.mappings.refOldCol;
-    elements.refNewSelect.value = state.mappings.refNewCol;
-    renderTargetCheckboxes();
     renderDataPreview();
     revealMapping();
 
     showToast(t('toastSampleLoaded'), 'success');
+  }
+
+  /**
+   * Human-readable column name: the header, or "Column C" when the sheet has no header row
+   * or the header cell is empty.
+   */
+  function columnDisplayName(col) {
+    if (!state.hasHeaderRow || /^__EMPTY(_\d+)?$/.test(col)) {
+      const letter = (state.columnLetters && state.columnLetters[col]) || (state.hasHeaderRow ? '?' : col);
+      return t('columnLetterLabel', { COL: letter });
+    }
+    return String(col);
+  }
+
+  function rowNumberOf(idx) {
+    return ComparatorEngine.rowNumberOf(state.rowNumbers, idx);
+  }
+
+  function rowLabelOf(idx) {
+    return t('rowLabel') + ' ' + rowNumberOf(idx);
   }
 
   /**
@@ -627,18 +712,20 @@
       elements.previewRowsCount.textContent = `(${state.rows.length} ${t('rowsLabel')})`;
     }
 
-    // Header row
-    elements.previewTableHead.innerHTML = '<tr>' + state.headers.map(function (h) {
-      return `<th style="padding:0.5rem 0.75rem; font-size:0.8rem; background:var(--bg-tertiary); border:1px solid var(--border-color);">${ComparatorEngine.escapeHtml(h)}</th>`;
-    }).join('') + '</tr>';
+    const thStyle = 'padding:0.5rem 0.75rem; font-size:0.8rem; background:var(--bg-tertiary); border:1px solid var(--border-color);';
+    elements.previewTableHead.innerHTML = '<tr>' + `<th style="${thStyle}">${ComparatorEngine.escapeHtml(t('rowLabel'))}</th>` +
+      state.headers.map(function (h) {
+        return `<th style="${thStyle}">${ComparatorEngine.escapeHtml(columnDisplayName(h))}</th>`;
+      }).join('') + '</tr>';
 
-    // Sample rows (first 4)
-    const sampleRows = state.rows.slice(0, 4);
-    elements.previewTableBody.innerHTML = sampleRows.map(function (row) {
-      return '<tr>' + state.headers.map(function (h) {
-        let val = row[h] !== undefined ? String(row[h]) : '';
+    // Sample rows (first 4); whitespace is collapsed so long single-line cells stay readable
+    const tdStyle = 'padding:0.45rem 0.75rem; font-size:0.8rem; border:1px solid var(--border-color); color:var(--text-secondary); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+    elements.previewTableBody.innerHTML = state.rows.slice(0, 4).map(function (row, idx) {
+      return '<tr>' + `<td style="${tdStyle} font-family:var(--font-mono);">${rowNumberOf(idx)}</td>` + state.headers.map(function (h) {
+        let val = row[h] !== undefined ? String(row[h]).replace(/\s+/g, ' ').trim() : '';
+        const full = val;
         if (val.length > 60) val = val.substring(0, 57) + '...';
-        return `<td style="padding:0.45rem 0.75rem; font-size:0.8rem; border:1px solid var(--border-color); color:var(--text-secondary); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">${ComparatorEngine.escapeHtml(val)}</td>`;
+        return `<td style="${tdStyle}" title="${ComparatorEngine.escapeHtml(full.slice(0, 500))}">${ComparatorEngine.escapeHtml(val)}</td>`;
       }).join('') + '</tr>';
     }).join('');
   }
@@ -648,7 +735,7 @@
     const headers = SampleGenerator.getSampleHeaders();
     const worksheet = XLSX.utils.json_to_sheet(data, { header: headers });
 
-    const colWidths = headers.map(function (h) {
+    worksheet['!cols'] = headers.map(function (h) {
       let maxLen = h.length;
       data.forEach(function (r) {
         const val = r[h] ? String(r[h]) : '';
@@ -656,149 +743,235 @@
       });
       return { wch: Math.max(maxLen + 3, 14) };
     });
-    worksheet['!cols'] = colWidths;
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, worksheet, 'Eticky_Kodex');
-    XLSX.writeFile(wb, 'vzorec_eticky_kodex_2024_2026.xlsx');
+    XLSX.utils.book_append_sheet(wb, worksheet, 'Data');
+    XLSX.writeFile(wb, 'ukazkovy_dokument.xlsx');
     showToast(t('toastSampleDownloaded'), 'success');
   }
 
   /**
-   * Column Mapping UI & Heuristics
+   * Column selection: two reference columns, then for every other column whether it holds the
+   * old version of a language (used) or is ignored, the language name and which column holds or
+   * will hold its new version.
    */
+
+  // Columns with longer text in a reasonable share of rows are pre-selected as languages;
+  // the actual languages are never guessed from the header names.
+  function selectDefaultLanguageColumns() {
+    state.headers.forEach(function (h) {
+      let filled = 0;
+      let totalWords = 0;
+      state.rows.forEach(function (row) {
+        const v = row[h];
+        if (typeof v === 'string' && v) {
+          filled++;
+          totalWords += v.split(/\s+/).filter(Boolean).length;
+        }
+      });
+      const isText = filled >= Math.max(1, state.rows.length * 0.5) && totalWords / Math.max(filled, 1) >= 3;
+      if (isText) setLanguageUsed(h, true);
+    });
+  }
+
+  function ensureLanguageConfig(col) {
+    if (!state.mappings.languages) state.mappings.languages = {};
+    if (!state.mappings.languages[col]) {
+      state.mappings.languages[col] = { label: '', newCol: '', newColName: '' };
+    }
+    return state.mappings.languages[col];
+  }
+
+  function languageLabel(col) {
+    const cfg = state.mappings.languages && state.mappings.languages[col];
+    return (cfg && cfg.label) || ComparatorEngine.defaultLanguageLabel(columnDisplayName(col), state.mappings.refOldCol);
+  }
+
+  function defaultNewColNameFor(col) {
+    return ComparatorEngine.defaultNewColName(col, state.mappings.refOldCol, state.mappings.refNewCol, t('newColSuffix'));
+  }
+
+  function newColumnOwner(col) {
+    return state.mappings.targetCols.find(function (c) {
+      return state.mappings.languages[c] && state.mappings.languages[c].newCol === col;
+    }) || '';
+  }
+
+  function setLanguageUsed(col, used) {
+    const targets = state.mappings.targetCols;
+    if (used) {
+      ensureLanguageConfig(col);
+      if (targets.indexOf(col) === -1) targets.push(col);
+      // Keep the sheet's column order
+      targets.sort(function (a, b) { return state.headers.indexOf(a) - state.headers.indexOf(b); });
+    } else {
+      const pos = targets.indexOf(col);
+      if (pos !== -1) targets.splice(pos, 1);
+    }
+  }
+
+  /**
+   * Store final labels and new-column names, so exports and the project file are explicit.
+   */
+  function finalizeLanguageConfig() {
+    state.mappings.targetCols.forEach(function (col) {
+      const cfg = ensureLanguageConfig(col);
+      if (!cfg.label) cfg.label = languageLabel(col);
+      if (cfg.newCol && state.headers.indexOf(cfg.newCol) === -1) cfg.newCol = '';
+      if (!cfg.newColName) cfg.newColName = defaultNewColNameFor(col);
+    });
+  }
+
+  /**
+   * When the reference columns differ by a version number (e.g. "EN 2024" / "EN 2026") and the
+   * sheet already has the matching column for a language ("CS 2026"), use it as its new version.
+   */
+  function autoPairNewColumns() {
+    state.mappings.targetCols.slice().forEach(function (col) {
+      const cfg = ensureLanguageConfig(col);
+      if (cfg.newCol) return;
+      const candidate = ComparatorEngine.defaultNewColName(col, state.mappings.refOldCol, state.mappings.refNewCol, '\u0000');
+      if (candidate.indexOf('\u0000') !== -1 || candidate === col || state.headers.indexOf(candidate) === -1) return;
+      if (candidate === state.mappings.refOldCol || candidate === state.mappings.refNewCol || newColumnOwner(candidate)) return;
+      setLanguageUsed(candidate, false);
+      cfg.newCol = candidate;
+    });
+  }
+
+  function onReferenceChanged() {
+    const m = state.mappings;
+    [m.refOldCol, m.refNewCol].forEach(function (ref) {
+      if (!ref) return;
+      setLanguageUsed(ref, false);
+      m.targetCols.forEach(function (c) {
+        if (m.languages[c] && m.languages[c].newCol === ref) m.languages[c].newCol = '';
+      });
+    });
+    autoPairNewColumns();
+    renderLanguageTable();
+  }
+
+  function fillColumnSelect(select, value) {
+    select.innerHTML = '';
+    const placeholder = document.createElement('option');
+    placeholder.value = '';
+    placeholder.textContent = t('selectColumnPlaceholder');
+    select.appendChild(placeholder);
+    state.headers.forEach(function (h) {
+      const opt = document.createElement('option');
+      opt.value = h;
+      opt.textContent = columnDisplayName(h);
+      select.appendChild(opt);
+    });
+    select.value = value || '';
+  }
+
   function renderColumnMappingControls() {
     elements.mappingContainer.style.display = 'block';
-
-    elements.refOldSelect.innerHTML = `<option value="">-- ${t('refOldLabel')} --</option>`;
-    elements.refNewSelect.innerHTML = `<option value="">-- ${t('refNewLabel')} --</option>`;
-
-    state.headers.forEach(function (h) {
-      const optOld = document.createElement('option');
-      optOld.value = h;
-      optOld.textContent = h;
-      elements.refOldSelect.appendChild(optOld);
-
-      const optNew = document.createElement('option');
-      optNew.value = h;
-      optNew.textContent = h;
-      elements.refNewSelect.appendChild(optNew);
-    });
+    fillColumnSelect(elements.refOldSelect, state.mappings.refOldCol);
+    fillColumnSelect(elements.refNewSelect, state.mappings.refNewCol);
 
     elements.refOldSelect.onchange = function () {
       state.mappings.refOldCol = elements.refOldSelect.value;
-      renderTargetCheckboxes();
+      onReferenceChanged();
     };
 
     elements.refNewSelect.onchange = function () {
       state.mappings.refNewCol = elements.refNewSelect.value;
-      renderTargetCheckboxes();
+      onReferenceChanged();
     };
 
-    renderTargetCheckboxes();
+    renderLanguageTable();
   }
 
-  function renderTargetCheckboxes() {
-    elements.targetColsContainer.innerHTML = '';
+  function firstSampleText(col) {
+    const row = state.rows.find(function (r) { return r[col] !== '' && r[col] !== undefined && r[col] !== null; });
+    return row ? String(row[col]).replace(/\s+/g, ' ').slice(0, 200) : '';
+  }
+
+  function renderLanguageTable() {
+    const tbody = elements.languagesTableBody;
+    const m = state.mappings;
+    const esc = ComparatorEngine.escapeHtml;
+    tbody.innerHTML = '';
+
     state.headers.forEach(function (h) {
-      if (h === state.mappings.refOldCol || h === state.mappings.refNewCol) {
-        return;
+      if (h === m.refOldCol || h === m.refNewCol) return;
+      const used = m.targetCols.indexOf(h) !== -1;
+      const owner = used ? '' : newColumnOwner(h);
+      const tr = document.createElement('tr');
+      tr.className = used ? 'lang-row-used' : (owner ? 'lang-row-paired' : 'lang-row-ignored');
+      tr.setAttribute('data-col', h);
+
+      let html = `<td><input type="checkbox" class="lang-use-cb" ${used ? 'checked' : ''} ${owner ? 'disabled' : ''}></td>`;
+      html += `<td class="lang-col-name" title="${esc(firstSampleText(h))}">${esc(columnDisplayName(h))}</td>`;
+
+      if (used) {
+        const cfg = ensureLanguageConfig(h);
+        const candidates = state.headers.filter(function (c) {
+          return c !== h && c !== m.refOldCol && c !== m.refNewCol && m.targetCols.indexOf(c) === -1 &&
+            (!newColumnOwner(c) || newColumnOwner(c) === h);
+        });
+        html += `<td><input type="text" class="form-input lang-label-input" value="${esc(languageLabel(h))}"></td>`;
+        html += '<td><div class="new-col-cell"><select class="form-select lang-newcol-select">' +
+          `<option value="">${esc(t('optCreateNewCol'))}</option>` +
+          candidates.map(function (c) {
+            return `<option value="${esc(c)}" ${cfg.newCol === c ? 'selected' : ''}>${esc(columnDisplayName(c))}</option>`;
+          }).join('') + '</select>' +
+          (cfg.newCol ? '' : `<input type="text" class="form-input lang-newname-input" value="${esc(cfg.newColName || '')}" placeholder="${esc(defaultNewColNameFor(h))}" title="${esc(t('newColNamePlaceholder'))}">`) +
+          '</div></td>';
+      } else if (owner) {
+        html += `<td colspan="2">${esc(t('usedAsNewVersionOf', { LANG: languageLabel(owner) }))}</td>`;
+      } else {
+        html += `<td colspan="2">${esc(t('ignoredColumn'))}</td>`;
       }
+      tr.innerHTML = html;
+      tbody.appendChild(tr);
 
-      const label = document.createElement('label');
-      label.className = 'target-lang-item';
-
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = h;
-      cb.checked = state.mappings.targetCols.includes(h);
-
+      const cb = tr.querySelector('.lang-use-cb');
       cb.addEventListener('change', function () {
-        updateSelectedTargetCols();
+        setLanguageUsed(h, cb.checked);
+        renderLanguageTable();
       });
-
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(' ' + h));
-      elements.targetColsContainer.appendChild(label);
-    });
-  }
-
-  function updateSelectedTargetCols() {
-    const selected = [];
-    const cbs = elements.targetColsContainer.querySelectorAll('input[type="checkbox"]:checked');
-    cbs.forEach(function (cb) {
-      selected.push(cb.value);
-    });
-    state.mappings.targetCols = selected;
-  }
-
-  const GERMAN_TOKENS = ['de', 'deu', 'ger', 'german', 'deutsch', 'nemcina', 'němčina', 'referenz', 'reference', 'ref'];
-  const OLD_TOKENS = ['2024', 'alt', 'old', 'stara', 'stará', 'puvodni', 'původní'];
-  const NEW_TOKENS = ['2026', 'neu', 'new', 'nova', 'nová'];
-  const LANGUAGE_TOKENS = ['en', 'cs', 'cz', 'sk', 'fr', 'es', 'it', 'pl', 'nl', 'hu', 'ro', 'pt', 'sv', 'da', 'fi', 'no', 'el',
-    'bg', 'hr', 'sl', 'sr', 'lt', 'lv', 'et', 'ru', 'uk', 'tr', 'zh', 'ja', 'ko', 'ar', 'he',
-    'english', 'czech', 'french', 'spanish', 'italian', 'polish', 'dutch', 'slovak', 'hungarian', 'romanian'];
-
-  function headerTokens(header) {
-    return String(header).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-  }
-
-  function hasAnyToken(tokens, list) {
-    return tokens.some(function (tok) { return list.indexOf(tok) !== -1; });
-  }
-
-  function autoDetectColumnMappings() {
-    const headers = state.headers;
-    let foundRefOld = '';
-    let foundRefNew = '';
-    const candidateTargets = [];
-
-    headers.forEach(function (h) {
-      const tokens = headerTokens(h);
-      const isGerman = hasAnyToken(tokens, GERMAN_TOKENS) && !hasAnyToken(tokens, LANGUAGE_TOKENS);
-      if (isGerman && !foundRefOld && hasAnyToken(tokens, OLD_TOKENS)) {
-        foundRefOld = h;
-      } else if (isGerman && !foundRefNew && hasAnyToken(tokens, NEW_TOKENS)) {
-        foundRefNew = h;
-      } else if (!isGerman && !hasAnyToken(tokens, NEW_TOKENS) &&
-        (hasAnyToken(tokens, LANGUAGE_TOKENS) || (hasAnyToken(tokens, ['2024']) && tokens.length > 1))) {
-        candidateTargets.push(h);
+      const labelInput = tr.querySelector('.lang-label-input');
+      if (labelInput) {
+        labelInput.addEventListener('input', function () {
+          ensureLanguageConfig(h).label = labelInput.value.trim();
+        });
+      }
+      const newColSelect = tr.querySelector('.lang-newcol-select');
+      if (newColSelect) {
+        newColSelect.addEventListener('change', function () {
+          ensureLanguageConfig(h).newCol = newColSelect.value;
+          renderLanguageTable();
+        });
+      }
+      const newNameInput = tr.querySelector('.lang-newname-input');
+      if (newNameInput) {
+        newNameInput.addEventListener('input', function () {
+          ensureLanguageConfig(h).newColName = newNameInput.value.trim();
+        });
       }
     });
-
-    if (foundRefOld) {
-      state.mappings.refOldCol = foundRefOld;
-      elements.refOldSelect.value = foundRefOld;
-    }
-    if (foundRefNew) {
-      state.mappings.refNewCol = foundRefNew;
-      elements.refNewSelect.value = foundRefNew;
-    }
-
-    state.mappings.targetCols = candidateTargets.filter(function (h) {
-      return h !== state.mappings.refOldCol && h !== state.mappings.refNewCol;
-    });
-    renderTargetCheckboxes();
-
-    if (foundRefOld && foundRefNew) {
-      showToast(t('toastAutoDetectSuccess'), 'success');
-    }
   }
 
   /**
    * Initialize translation stubs for target languages
    */
   function ensureStubsInitialized() {
+    finalizeLanguageConfig();
     state.mappings.targetCols.forEach(function (targetCol) {
       // Rebuild every stub from the current rows/mapping and merge the saved work into it, so
-      // reference texts, the 2024 target text and classifications are always up to date
+      // reference texts, the old target text and classifications are always up to date
       // (also after changing the reference columns or loading a compact project file).
+      // Text already present in the language's new-version column is used as the starting point.
       state.translations[targetCol] = ComparatorEngine.rehydrateStubs(
         state.rows,
         state.translations[targetCol],
         targetCol,
         state.mappings.refOldCol,
-        state.mappings.refNewCol
+        state.mappings.refNewCol,
+        state.mappings.languages[targetCol].newCol
       );
     });
 
@@ -836,10 +1009,8 @@
       const tr = document.createElement('tr');
       tr.style.borderBottom = '1px solid var(--border-color)';
 
-      // Row ID / Section
-      const idCol = state.headers[0] || 'ID';
-      const sectionCol = state.headers[1] || '';
-      const rowLabel = (row[idCol] ? row[idCol] + ' ' : '') + (row[sectionCol] ? '(' + row[sectionCol] + ')' : (t('rowLabel') + ' ') + (idx + 1));
+      // Paragraphs have no headings of their own; the Excel row number identifies them
+      const rowLabel = rowLabelOf(idx);
 
       // Diff preview
       let diffHtml = '';
@@ -920,7 +1091,7 @@
       const pill = document.createElement('div');
       pill.className = 'matrix-pill' + (isActive ? ' active' : '') + (isComplete ? ' complete' : '');
       pill.innerHTML = `
-        <span class="matrix-pill-lang">${ComparatorEngine.escapeHtml(col)}</span>
+        <span class="matrix-pill-lang">${ComparatorEngine.escapeHtml(languageLabel(col))}</span>
         <span class="matrix-pill-pct">${pct}% (${verified}/${total})</span>
       `;
 
@@ -1001,7 +1172,7 @@
       const total = stubs.length;
 
       tab.innerHTML = `
-        <span>${ComparatorEngine.escapeHtml(col)}</span>
+        <span>${ComparatorEngine.escapeHtml(languageLabel(col))}</span>
         <span class="lang-tab-badge">${verifiedCount}/${total}</span>
       `;
 
@@ -1040,8 +1211,8 @@
   }
 
   /**
-   * Column 4 diff of the translation (2024 → 2026). An empty editor is shown as "not translated
-   * yet" rather than as the whole 2024 text being deleted (except for removed articles).
+   * Column 4 diff of the language (old → new version). An empty editor is shown as "not translated
+   * yet" rather than as the whole old text being deleted (except for removed paragraphs).
    */
   function renderTargetDiffHtml(stub) {
     const hint = function (key) {
@@ -1063,13 +1234,13 @@
 
     elements.articlesContainer.innerHTML = '';
     const stubs = state.translations[col];
-    const idCol = state.headers[0];
-    const sectionCol = state.headers[1];
+    const esc = ComparatorEngine.escapeHtml;
+    const langLabel = esc(languageLabel(col));
+    const refLabel = esc(columnDisplayName(state.mappings.refNewCol));
 
     let renderedCount = 0;
 
     stubs.forEach(function (stub, idx) {
-      const row = state.rows[idx];
       const classification = stub.classification;
 
       // Filtering logic
@@ -1082,7 +1253,7 @@
       // Search query filter
       if (state.searchQuery) {
         const q = state.searchQuery.toLowerCase();
-        const fullContent = (row[idCol] + ' ' + row[sectionCol] + ' ' + stub.refOld + ' ' + stub.refNew + ' ' + stub.targetOld + ' ' + stub.targetNew).toLowerCase();
+        const fullContent = (rowLabelOf(idx) + ' ' + stub.refOld + ' ' + stub.refNew + ' ' + stub.targetOld + ' ' + stub.targetNew).toLowerCase();
         if (!fullContent.includes(q)) return;
       }
 
@@ -1092,25 +1263,23 @@
       card.className = 'article-card ' + (stub.isVerified ? 'status-verified' : 'status-pending');
       card.id = 'article-card-' + idx;
 
-      const rowTitle = (row[idCol] ? row[idCol] : (t('rowLabel') + ' ') + (idx + 1));
-      const sectionTitle = (row[sectionCol] ? row[sectionCol] : '');
+      // Paragraphs have no headings; only the row number is shown above the texts
+      const rowTitle = rowLabelOf(idx);
 
-      // 1. Reference Diff (German 2024 -> 2026)
+      // 1. Reference Diff (old -> new)
       const refDiffRes = ComparatorEngine.computeDiff(stub.refOld, stub.refNew);
       const refDiffHtml = ComparatorEngine.renderDiffHtml(refDiffRes, 'inline');
 
-      // 2. Target Diff (Target 2024 -> Target 2026)
+      // 2. Target Diff (old -> new version of the language)
       const targetDiffHtml = renderTargetDiffHtml(stub);
 
       // Card Header with optional search highlight
       const rowTitleHtml = highlightQuery(rowTitle, state.searchQuery);
-      const sectionTitleHtml = highlightQuery(sectionTitle, state.searchQuery);
 
       const headerHtml = `
         <div class="article-header">
           <div class="article-meta">
             <span class="article-id">${rowTitleHtml}</span>
-            ${sectionTitle ? `<span class="article-section">${sectionTitleHtml}</span>` : ''}
             ${renderBadgeHtml(classification)}
           </div>
           <div>
@@ -1122,32 +1291,32 @@
         </div>
       `;
 
-      // Column 1: Reference German Diff
+      // Column 1: Reference diff
       const col1RefHtml = `
         <div class="sub-panel">
           <div class="sub-panel-title">
-            <span>${t('cardRefPanelTitle')}</span>
+            <span>${t('cardRefPanelTitle', { LANG: refLabel })}</span>
             ${refDiffRes.stats.hasChanges ? `<span style="font-size:0.75rem; color:#b45309; font-weight:600;">${t('changePct', { PCT: Math.round((1 - refDiffRes.stats.similarity) * 100) })}</span>` : `<span style="font-size:0.75rem; color:#15803d; font-weight:600;">${t('match100')}</span>`}
           </div>
           <div class="diff-box">${refDiffHtml || `<span style="color:var(--text-muted);">${t('emptyCell')}</span>`}</div>
         </div>
       `;
 
-      // Column 2: Approved Original Target Translation (2024)
+      // Column 2: Old version of the language
       const col2OldHtml = `
         <div class="sub-panel">
           <div class="sub-panel-title">
-            <span>${t('cardTargetOldTitle', { LANG: col })}</span>
+            <span>${t('cardTargetOldTitle', { LANG: langLabel })}</span>
           </div>
           <div class="diff-box" style="background-color:var(--bg-tertiary); color:var(--text-secondary);">${ComparatorEngine.escapeHtml(stub.targetOld) || `<span style="color:var(--text-muted); font-style:italic;">${t('emptyOriginalText')}</span>`}</div>
         </div>
       `;
 
-      // Column 3: Updated 2026 Target Translation (Editor)
+      // Column 3: New version of the language (editor)
       const col3NewEditorHtml = `
         <div class="sub-panel">
           <div class="sub-panel-title">
-            <span>${t('cardTargetNewTitle', { LANG: col })}</span>
+            <span>${t('cardTargetNewTitle', { LANG: langLabel })}</span>
           </div>
           <textarea class="form-textarea target-textarea" data-index="${idx}" placeholder="${t('textareaPlaceholder')}">${ComparatorEngine.escapeHtml(stub.targetNew)}</textarea>
           <div class="editor-toolbar">
@@ -1164,7 +1333,7 @@
       const col4DiffHtml = `
         <div class="sub-panel">
           <div class="sub-panel-title">
-            <span>${t('cardTargetDiffTitle', { LANG: col })}</span>
+            <span>${t('cardTargetDiffTitle', { LANG: langLabel })}</span>
           </div>
           <div class="diff-box live-target-diff" id="target-diff-${idx}">${targetDiffHtml}</div>
         </div>
@@ -1276,7 +1445,7 @@
       });
     });
 
-    // Prefill from 2024
+    // Prefill with the old version
     elements.articlesContainer.querySelectorAll('.prefill-old-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const idx = parseInt(btn.getAttribute('data-index'), 10);
@@ -1290,7 +1459,7 @@
       });
     });
 
-    // Prefill from German reference
+    // Prefill with the reference text
     elements.articlesContainer.querySelectorAll('.prefill-ref-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const idx = parseInt(btn.getAttribute('data-index'), 10);
@@ -1308,17 +1477,13 @@
   function copyPromptForIndex(idx) {
     const col = state.activeTargetCol;
     const stub = state.translations[col][idx];
-    const row = state.rows[idx];
-    const idCol = state.headers[0];
-    const sectionCol = state.headers[1];
-
-    const rowId = (row[idCol] ? row[idCol] : (t('rowLabel') + ' ') + (idx + 1)) + (row[sectionCol] ? ' (' + row[sectionCol] + ')' : '');
     const refDiffRes = ComparatorEngine.computeDiff(stub.refOld, stub.refNew);
 
     const promptText = ComparatorEngine.buildCopilotPrompt({
       promptLang: I18n.getLanguage(),
-      targetLangName: col,
-      rowId: rowId,
+      targetLangName: languageLabel(col),
+      refLangName: columnDisplayName(state.mappings.refNewCol),
+      rowId: ComparatorEngine.rowTag(state.rowNumbers, idx),
       classification: stub.classification,
       refOld: stub.refOld,
       refNew: stub.refNew,
@@ -1435,55 +1600,105 @@
 
   /**
    * Step 4: Export Logic
+   * One language selector drives the printable document, the change summary and the partial
+   * workbook: the reference (new version) or any of the languages.
    */
+  function documentBaseName() {
+    return (state.fileName || 'dokument').replace(/\.[^/.]+$/, '');
+  }
+
   function updatePdfLanguageDropdown() {
     if (!elements.pdfLangSelect) return;
-    elements.pdfLangSelect.innerHTML = '';
+    const select = elements.pdfLangSelect;
+    select.innerHTML = '';
 
-    // 1. Reference German 2026
     if (state.mappings.refNewCol) {
       const optRef = document.createElement('option');
       optRef.value = state.mappings.refNewCol;
-      optRef.textContent = `🇩🇪 ${state.mappings.refNewCol} (${t('pdfOptionRefNew')})`;
-      elements.pdfLangSelect.appendChild(optRef);
+      optRef.textContent = `${columnDisplayName(state.mappings.refNewCol)} (${t('pdfOptionRefNew')})`;
+      select.appendChild(optRef);
     }
 
-    // 2. Target language editions
-    if (state.mappings.targetCols && state.mappings.targetCols.length > 0) {
-      state.mappings.targetCols.forEach(function (col) {
-        const opt = document.createElement('option');
-        opt.value = col;
-        const cleanName = col.replace(/2024/i, '2026');
-        opt.textContent = `🌐 ${cleanName}`;
-        elements.pdfLangSelect.appendChild(opt);
-      });
-    }
+    state.mappings.targetCols.forEach(function (col) {
+      const opt = document.createElement('option');
+      opt.value = col;
+      opt.textContent = languageLabel(col);
+      select.appendChild(opt);
+    });
 
-    if (state.activeTargetCol && state.mappings.targetCols.includes(state.activeTargetCol)) {
-      elements.pdfLangSelect.value = state.activeTargetCol;
-    }
+    const valid = function (col) {
+      return col && (col === state.mappings.refNewCol || state.mappings.targetCols.indexOf(col) !== -1);
+    };
+    select.value = valid(state.exportLangCol) ? state.exportLangCol
+      : (valid(state.activeTargetCol) ? state.activeTargetCol : (select.options[0] ? select.options[0].value : ''));
+    state.exportLangCol = select.value;
+    renderPartialContextOptions();
+  }
+
+  function selectedExportLang() {
+    const col = elements.pdfLangSelect ? elements.pdfLangSelect.value : state.exportLangCol;
+    if (!col) showToast(t('toastPdfSelectLang'), 'warning');
+    return col;
   }
 
   /**
-   * Export Managerial Summary (Markdown, Word .doc, PDF)
+   * Checkboxes of the columns that accompany the selected language in the partial workbook
+   * (by default the reference old and new version).
    */
-  function exportManagerialSummary(format) {
-    if (!state.rows || state.rows.length === 0 || !state.mappings.refOldCol || !state.mappings.refNewCol) {
-      showToast(t('alertSelectRefCols'), 'warning');
-      return;
+  function renderPartialContextOptions() {
+    const container = elements.partialContextContainer;
+    if (!container) return;
+    const langCol = state.exportLangCol;
+    const isReference = langCol === state.mappings.refNewCol;
+    const own = isReference
+      ? [state.mappings.refOldCol, state.mappings.refNewCol]
+      : [langCol, state.mappings.languages[langCol] && state.mappings.languages[langCol].newCol];
+    if (!Array.isArray(state.partialContextCols)) {
+      state.partialContextCols = [state.mappings.refOldCol, state.mappings.refNewCol].filter(Boolean);
     }
 
-    const companyName = (state.pdfTemplate && state.pdfTemplate.companyName)
-      ? state.pdfTemplate.companyName
-      : (state.fileName ? state.fileName.replace(/\.[^/.]+$/, '') : 'Corporate Group');
+    container.innerHTML = '';
+    state.headers.forEach(function (h) {
+      if (own.indexOf(h) !== -1) return;
+      const label = document.createElement('label');
+      label.className = 'checkbox-label';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = h;
+      cb.checked = state.partialContextCols.indexOf(h) !== -1;
+      cb.addEventListener('change', function () {
+        const list = state.partialContextCols;
+        const pos = list.indexOf(h);
+        if (cb.checked && pos === -1) list.push(h);
+        if (!cb.checked && pos !== -1) list.splice(pos, 1);
+        persistState(300);
+      });
+      label.appendChild(cb);
+      label.appendChild(document.createTextNode(columnDisplayName(h)));
+      container.appendChild(label);
+    });
+  }
+
+  /**
+   * Change summary (Markdown, Word .doc, PDF) of one language: from Step 2 always the reference,
+   * from Step 4 the language selected in the export selector.
+   */
+  function exportManagerialSummary(format, langCol) {
+    if (!state.rows || state.rows.length === 0 || getMappingError(false)) {
+      showToast(t(state.rows.length ? getMappingError(false) : 'toastNoData'), 'warning');
+      return;
+    }
+    const col = langCol || state.mappings.refNewCol;
+    if (col !== state.mappings.refNewCol) ensureStubsInitialized();
 
     const options = {
       rows: state.rows,
-      headers: state.headers,
       mappings: state.mappings,
-      companyName: companyName,
-      uiLang: I18n.getLanguage(),
-      template: state.pdfTemplate
+      translations: state.translations,
+      rowNumbers: state.rowNumbers,
+      langCol: col,
+      documentName: documentBaseName(),
+      uiLang: I18n.getLanguage()
     };
 
     if (format === 'markdown') {
@@ -1497,114 +1712,92 @@
     }
   }
 
+  function documentOptions(col) {
+    return {
+      rows: state.rows,
+      mappings: state.mappings,
+      translations: state.translations,
+      rowNumbers: state.rowNumbers,
+      targetCol: col,
+      documentName: documentBaseName(),
+      uiLang: I18n.getLanguage(),
+      template: state.pdfTemplate
+    };
+  }
+
   function initExports() {
     elements.downloadComprehensiveBtn.addEventListener('click', function () {
       downloadExcelWorkbook('comprehensive');
     });
 
     elements.downloadCleanBtn.addEventListener('click', function () {
-      downloadExcelWorkbook('clean_2026');
+      downloadExcelWorkbook('clean');
+    });
+
+    elements.downloadPartialBtn.addEventListener('click', function () {
+      const col = selectedExportLang();
+      if (col) downloadExcelWorkbook('language', col);
     });
 
     elements.exportProjectJsonBtn.addEventListener('click', function () {
       exportProjectFile();
     });
 
-    // Managerial Summary Exports (Step 2 and Step 4)
-    if (elements.step2ExportMdBtn) {
-      elements.step2ExportMdBtn.addEventListener('click', function () { exportManagerialSummary('markdown'); });
-    }
-    if (elements.step2ExportDocBtn) {
-      elements.step2ExportDocBtn.addEventListener('click', function () { exportManagerialSummary('word'); });
-    }
-    if (elements.step2ExportPdfBtn) {
-      elements.step2ExportPdfBtn.addEventListener('click', function () { exportManagerialSummary('pdf'); });
-    }
-    if (elements.downloadMgrMdBtn) {
-      elements.downloadMgrMdBtn.addEventListener('click', function () { exportManagerialSummary('markdown'); });
-    }
-    if (elements.downloadMgrDocBtn) {
-      elements.downloadMgrDocBtn.addEventListener('click', function () { exportManagerialSummary('word'); });
-    }
-    if (elements.printMgrPdfBtn) {
-      elements.printMgrPdfBtn.addEventListener('click', function () { exportManagerialSummary('pdf'); });
-    }
+    elements.pdfLangSelect.addEventListener('change', function () {
+      state.exportLangCol = elements.pdfLangSelect.value;
+      renderPartialContextOptions();
+      persistState(300);
+    });
 
-    // PDF Print / Save as PDF
-    if (elements.printPdfBtn) {
-      elements.printPdfBtn.addEventListener('click', function () {
-        const selectedCol = elements.pdfLangSelect ? elements.pdfLangSelect.value : state.activeTargetCol;
-        if (!selectedCol) {
-          showToast(t('toastPdfSelectLang'), 'warning');
-          return;
-        }
+    // Change summary: Step 2 = reference, Step 4 = selected language
+    elements.step2ExportMdBtn.addEventListener('click', function () { exportManagerialSummary('markdown'); });
+    elements.step2ExportDocBtn.addEventListener('click', function () { exportManagerialSummary('word'); });
+    elements.step2ExportPdfBtn.addEventListener('click', function () { exportManagerialSummary('pdf'); });
+    elements.downloadMgrMdBtn.addEventListener('click', function () {
+      const col = selectedExportLang();
+      if (col) exportManagerialSummary('markdown', col);
+    });
+    elements.downloadMgrDocBtn.addEventListener('click', function () {
+      const col = selectedExportLang();
+      if (col) exportManagerialSummary('word', col);
+    });
+    elements.printMgrPdfBtn.addEventListener('click', function () {
+      const col = selectedExportLang();
+      if (col) exportManagerialSummary('pdf', col);
+    });
 
-        PdfExporter.printLanguageMutation({
-          rows: state.rows,
-          headers: state.headers,
-          mappings: state.mappings,
-          translations: state.translations,
-          targetCol: selectedCol,
-          companyName: state.fileName ? state.fileName.replace(/\.[^/.]+$/, '') : 'Corporate Group',
-          uiLang: I18n.getLanguage(),
-          template: state.pdfTemplate
+    // Printable document of the selected language
+    elements.printPdfBtn.addEventListener('click', function () {
+      const col = selectedExportLang();
+      if (col) PdfExporter.printLanguageMutation(documentOptions(col));
+    });
+
+    elements.downloadPdfHtmlBtn.addEventListener('click', function () {
+      const col = selectedExportLang();
+      if (!col) return;
+      PdfExporter.downloadPrintableHtml(documentOptions(col));
+      showToast(t('toastPdfHtmlDownloaded'), 'success');
+    });
+
+    // Print all languages
+    elements.printAllPdfBtn.addEventListener('click', function () {
+      const allCols = [];
+      if (state.mappings.refNewCol) allCols.push(state.mappings.refNewCol);
+      allCols.push.apply(allCols, state.mappings.targetCols);
+
+      if (allCols.length === 0) {
+        showToast(t('toastNoLanguages'), 'warning');
+        return;
+      }
+
+      if (confirm(t('confirmPrintAll', { COUNT: allCols.length }))) {
+        allCols.forEach(function (col, i) {
+          setTimeout(function () {
+            PdfExporter.printLanguageMutation(documentOptions(col));
+          }, i * 400);
         });
-      });
-    }
-
-    // PDF Download HTML
-    if (elements.downloadPdfHtmlBtn) {
-      elements.downloadPdfHtmlBtn.addEventListener('click', function () {
-        const selectedCol = elements.pdfLangSelect ? elements.pdfLangSelect.value : state.activeTargetCol;
-        if (!selectedCol) {
-          showToast(t('toastPdfSelectLang'), 'warning');
-          return;
-        }
-
-        PdfExporter.downloadPrintableHtml({
-          rows: state.rows,
-          headers: state.headers,
-          mappings: state.mappings,
-          translations: state.translations,
-          targetCol: selectedCol,
-          companyName: state.fileName ? state.fileName.replace(/\.[^/.]+$/, '') : 'Corporate Group',
-          uiLang: I18n.getLanguage(),
-          template: state.pdfTemplate
-        });
-        showToast(t('toastPdfHtmlDownloaded'), 'success');
-      });
-    }
-
-    // Batch Print All Languages
-    if (elements.printAllPdfBtn) {
-      elements.printAllPdfBtn.addEventListener('click', function () {
-        const allCols = [];
-        if (state.mappings.refNewCol) allCols.push(state.mappings.refNewCol);
-        if (state.mappings.targetCols) allCols.push(...state.mappings.targetCols);
-
-        if (allCols.length === 0) {
-          showToast(t('toastNoLanguages'), 'warning');
-          return;
-        }
-
-        if (confirm(t('confirmPrintAll', { COUNT: allCols.length }))) {
-          allCols.forEach(function (col, i) {
-            setTimeout(function () {
-              PdfExporter.printLanguageMutation({
-                rows: state.rows,
-                headers: state.headers,
-                mappings: state.mappings,
-                translations: state.translations,
-                targetCol: col,
-                companyName: state.fileName ? state.fileName.replace(/\.[^/.]+$/, '') : 'Corporate Group',
-                uiLang: I18n.getLanguage(),
-                template: state.pdfTemplate
-              });
-            }, i * 400);
-          });
-        }
-      });
-    }
+      }
+    });
   }
 
   /**
@@ -1649,12 +1842,13 @@
 
     const promptText = ComparatorEngine.buildBatchCopilotPrompt({
       promptLang: I18n.getLanguage(),
-      targetLangName: col,
+      targetCol: col,
+      targetLangName: languageLabel(col),
+      refLangName: columnDisplayName(state.mappings.refNewCol),
       rows: state.rows,
-      headers: state.headers,
+      rowNumbers: state.rowNumbers,
       mappings: state.mappings,
-      translations: state.translations,
-      filterType: 'all_modified'
+      translations: state.translations
     });
 
     elements.batchPromptTextarea.value = promptText;
@@ -1695,14 +1889,9 @@
 
         const col = state.activeTargetCol;
         const stubs = state.translations[col] || [];
-        const idCol = state.headers[0];
-
+        // Paragraphs are identified by their Excel row number ("#12")
         const expectedList = stubs.map(function (stub, idx) {
-          const row = state.rows[idx] || {};
-          return {
-            index: idx,
-            id: row[idCol] || ('Art. ' + (idx + 1))
-          };
+          return { index: idx, id: ComparatorEngine.rowTag(state.rowNumbers, idx) };
         });
 
         const parsed = ComparatorEngine.parseBatchTranslationResponse(text, expectedList);
@@ -1805,7 +1994,7 @@
           companyName: elements.tplCompanyName.value.trim(),
           effectiveDate: elements.tplEffectiveDate.value.trim(),
           docTitle: elements.tplDocTitle.value.trim(),
-          accentColor: /^#[0-9a-f]{3,8}$/i.test(elements.tplAccentColor.value.trim()) ? elements.tplAccentColor.value.trim() : '#1e3a8a',
+          accentColor: /^#[0-9a-f]{3,8}$/i.test(elements.tplAccentColor.value.trim()) ? elements.tplAccentColor.value.trim() : '#2563eb',
           docSubtitle: elements.tplDocSubtitle.value.trim(),
           versionLabel: elements.tplVersionLabel ? elements.tplVersionLabel.value.trim() : '',
           introPreamble: elements.tplIntroPreamble.value.trim(),
@@ -1832,31 +2021,26 @@
   }
 
   function openPdfTemplateModal() {
-    const isEn = I18n.getLanguage() === 'en';
-    const defaultCompany = state.fileName ? state.fileName.replace(/\.[^/.]+$/, '') : 'Corporate Group';
     const tpl = state.pdfTemplate || {};
+    const value = function (v, fallback) { return v !== undefined && v !== null ? v : fallback; };
 
-    elements.tplCompanyName.value = tpl.companyName !== undefined ? tpl.companyName : defaultCompany;
-    elements.tplEffectiveDate.value = tpl.effectiveDate !== undefined ? tpl.effectiveDate : (isEn ? 'Effective Date: January 1, 2026' : 'Účinnost od: 1. ledna 2026');
-    elements.tplDocTitle.value = tpl.docTitle !== undefined ? tpl.docTitle : (isEn ? 'CODE OF CONDUCT & ETHICS 2026' : 'ETICKÝ KODEX A PRAVIDLA CHOVÁNÍ 2026');
-    elements.tplAccentColor.value = tpl.accentColor || '#1e3a8a';
-    elements.tplAccentColorPicker.value = tpl.accentColor || '#1e3a8a';
-    elements.tplDocSubtitle.value = tpl.docSubtitle !== undefined ? tpl.docSubtitle : (isEn ? 'Official Certified Edition – {LANG}' : 'Oficiální certifikované znění – {LANG}');
-    if (elements.tplVersionLabel) {
-      elements.tplVersionLabel.value = tpl.versionLabel !== undefined ? tpl.versionLabel : (isEn ? 'Version 2.6 – Compliance Approved' : 'Verze 2.6 – Schváleno compliance');
-    }
-    elements.tplIntroPreamble.value = tpl.introPreamble !== undefined ? tpl.introPreamble : (isEn 
-      ? 'This document represents the official and binding Code of Conduct and Ethics for the 2026 cycle. All provisions herein supersede previous editions and apply to all operational entities and employees.'
-      : 'Tento dokument představuje oficiální a závazný Etický kodex pro období od roku 2026. Veškerá zde uvedená ustanovení nahrazují dřívější znění a jsou závazná pro všechny zaměstnance i vedoucí pracovníky.');
-    elements.tplShowSignatures.checked = tpl.showSignatures !== false;
+    elements.tplCompanyName.value = value(tpl.companyName, '');
+    elements.tplEffectiveDate.value = value(tpl.effectiveDate, '');
+    elements.tplDocTitle.value = value(tpl.docTitle, documentBaseName());
+    elements.tplAccentColor.value = tpl.accentColor || '#2563eb';
+    elements.tplAccentColorPicker.value = tpl.accentColor || '#2563eb';
+    elements.tplDocSubtitle.value = value(tpl.docSubtitle, '{LANG}');
+    elements.tplVersionLabel.value = value(tpl.versionLabel, '');
+    elements.tplIntroPreamble.value = value(tpl.introPreamble, '');
+    elements.tplShowSignatures.checked = tpl.showSignatures === true;
     elements.signaturesBlockInputs.style.display = elements.tplShowSignatures.checked ? 'grid' : 'none';
-    elements.tplSignDept1.value = tpl.signDept1 !== undefined ? tpl.signDept1 : (isEn ? 'Corporate Compliance & Legal' : 'Oddělení Compliance & Právní');
-    elements.tplSignDept2.value = tpl.signDept2 !== undefined ? tpl.signDept2 : (isEn ? 'Executive Board' : 'Vedení společnosti');
+    elements.tplSignDept1.value = value(tpl.signDept1, '');
+    elements.tplSignDept2.value = value(tpl.signDept2, '');
 
     elements.pdfTemplateModal.classList.add('open');
   }
 
-  function downloadExcelWorkbook(exportType) {
+  function downloadExcelWorkbook(exportType, langCol) {
     if (!state.rows || state.rows.length === 0) {
       showToast(t('toastNoData'), 'warning');
       return null;
@@ -1871,20 +2055,25 @@
     const result = ComparatorEngine.buildExportWorkbook(XLSX, {
       rows: state.rows,
       headers: state.headers,
+      rowNumbers: state.rowNumbers,
       mappings: state.mappings,
       translations: state.translations,
       exportType: exportType,
+      langCol: langCol,
+      contextCols: state.partialContextCols || [state.mappings.refOldCol, state.mappings.refNewCol],
       uiLang: I18n.getLanguage()
     });
 
-    const baseName = (state.fileName || 'Eticky_Kodex').replace(/\.[^/.]+$/, '').replace(/[\\/:*?"<>|]+/g, '_');
-    const suffix = exportType === 'clean_2026' ? '2026_Final' : '2024_2026_Srovnani';
-    const outputFileName = `${baseName}_${suffix}.xlsx`;
+    const safe = function (text) { return String(text).replace(/[\\/:*?"<>|]+/g, '_'); };
+    const suffix = exportType === 'clean' ? 'nova_verze'
+      : (exportType === 'language' ? safe(langCol === state.mappings.refNewCol ? columnDisplayName(langCol) : languageLabel(langCol)) : 'srovnani');
+    const outputFileName = `${safe(documentBaseName())}_${suffix}.xlsx`;
 
     XLSX.writeFile(result.workbook, outputFileName);
     showToast(t('toastWorkbookGenerated', { NAME: outputFileName }), 'success');
     if (result.unverifiedCount > 0) {
-      const key = exportType === 'clean_2026' ? 'toastExportUnverifiedClean' : 'toastExportUnverified';
+      const key = exportType === 'clean' ? 'toastExportUnverifiedClean'
+        : (exportType === 'language' ? 'toastExportUnverifiedLanguage' : 'toastExportUnverified');
       showToast(t(key, { COUNT: result.unverifiedCount }), 'warning');
     }
     return outputFileName;
@@ -1900,7 +2089,7 @@
       ensureStubsInitialized();
     }
     const fileName = StorageManager.exportProjectAsJson(state);
-    showToast(t('toastProjectSaved'), 'success');
+    showToast(t('toastProjectSaved', { NAME: fileName }), 'success');
     return fileName;
   }
 
@@ -1970,8 +2159,8 @@
       // 4. Stubs
       const sampleRows = SampleGenerator.getSampleData();
       const stubs = ComparatorEngine.generateTargetStub(sampleRows, 'CS 2024', 'DE 2024 (Referenz)', 'DE 2026 (Referenz)');
-      assertEq('Stub generation for 15 sample articles', stubs.length, 15);
-      assertEq('Unchanged Article 1 marked auto_copied', stubs[0].status, 'auto_copied');
+      assertEq('Stub generation for 15 sample paragraphs', stubs.length, 15);
+      assertEq('Unchanged paragraph 1 marked auto_copied', stubs[0].status, 'auto_copied');
 
       // 5. Prompt Builder (Bilingual test)
       const promptEn = ComparatorEngine.buildCopilotPrompt({
@@ -1983,7 +2172,7 @@
         targetOld: 'EN Old',
         diffResult: diffRes
       });
-      assertOk('buildCopilotPrompt generates English prompt', promptEn.includes('expert legal') && promptEn.includes('CRITICAL INSTRUCTIONS'));
+      assertOk('buildCopilotPrompt generates English prompt', promptEn.includes('professional translator') && promptEn.includes('CRITICAL INSTRUCTIONS'));
 
       // 6. Export prep
       const exportData = ComparatorEngine.prepareExportData({
@@ -1991,9 +2180,9 @@
         headers: SampleGenerator.getSampleHeaders(),
         mappings: SampleGenerator.getSampleDefaultMappings(),
         translations: { 'CS 2024': stubs },
-        exportType: 'clean_2026'
+        exportType: 'clean'
       });
-      assertOk('clean_2026 export filters deleted articles', exportData.data.length < sampleRows.length);
+      assertOk('clean export leaves out removed paragraphs', exportData.data.length < sampleRows.length);
 
       const summaryHtml = `
         <div style="padding:0.75rem; background:var(--bg-tertiary); border-radius:var(--radius-md); margin-bottom:1rem; font-weight:700;">
@@ -2037,9 +2226,9 @@
 
   function getDefaultPromptSample() {
     if (I18n.getLanguage() === 'en') {
-      return 'You are an expert corporate translator specializing in Codes of Ethics.\n\nTASK: Update the approved translation for 2026 in language: {TARGET_LANG}.\nIdentifier: {ROW_ID}\n\n1. GERMAN SOURCE (2024):\n{REF_OLD}\n\n2. GERMAN SOURCE (2026):\n{REF_NEW}\n\n3. APPROVED TRANSLATION (2024):\n{TARGET_OLD}\n\nINSTRUCTIONS:\nMake ONLY minimal necessary alterations. Preserve existing tone and terminology. Output only the final updated text.';
+      return 'You are an experienced professional translator.\n\nTASK: Update the approved translation in language {TARGET_LANG} to match the new version of the reference text.\nParagraph: {ROW_ID}\n\n1. REFERENCE – OLD VERSION ({REF_LANG}):\n{REF_OLD}\n\n2. REFERENCE – NEW VERSION:\n{REF_NEW}\n{CHANGES_SUMMARY}\n\n3. CURRENT APPROVED TRANSLATION ({TARGET_LANG}):\n{TARGET_OLD}\n\nINSTRUCTIONS:\nMake ONLY the minimal changes reflecting the reference difference. Keep the existing tone and terminology. Output only the final text.';
     }
-    return 'Jste špičkový odborný překladatel firemních a právních dokumentů (Etický kodex).\n\nÚKOL: Aktualizujte stávající schválený překlad odstavce pro rok 2026 v jazyce: {TARGET_LANG}.\nIdentifikátor: {ROW_ID}\n\n1. PŮVODNÍ NĚMECKÝ TEXT (2024):\n{REF_OLD}\n\n2. NOVÝ NĚMECKÝ TEXT (2026):\n{REF_NEW}\n\n3. DOSAVADNÍ OVĚŘENÝ PŘEKLAD (2024):\n{TARGET_OLD}\n\nPOKYNY:\nProveďte POUZE minimální nutné změny odpovídající německému rozdílu. Zachovejte zavedenou terminologii a styl. Vraťte výhradně čistý přeložený text.';
+    return 'Jste zkušený odborný překladatel.\n\nÚKOL: Aktualizujte schválený překlad v jazyce {TARGET_LANG} podle nové verze referenčního textu.\nOdstavec: {ROW_ID}\n\n1. REFERENCE – STARÁ VERZE ({REF_LANG}):\n{REF_OLD}\n\n2. REFERENCE – NOVÁ VERZE:\n{REF_NEW}\n{CHANGES_SUMMARY}\n\n3. DOSAVADNÍ SCHVÁLENÝ PŘEKLAD ({TARGET_LANG}):\n{TARGET_OLD}\n\nPOKYNY:\nProveďte POUZE minimální změny odpovídající rozdílu v referenci. Zachovejte zavedenou terminologii a styl. Vraťte výhradně výsledný text.';
   }
 
   /**
@@ -2064,27 +2253,36 @@
     state.headers = Array.isArray(data.headers) && data.headers.length > 0
       ? data.headers
       : Object.keys(state.rows[0] || {});
+    state.hasHeaderRow = data.hasHeaderRow !== false;
+    state.columnLetters = data.columnLetters || {};
+    state.rowNumbers = Array.isArray(data.rowNumbers) && data.rowNumbers.length === state.rows.length
+      ? data.rowNumbers
+      : state.rows.map(function (r, idx) { return idx + 2; });
     const mappings = data.mappings || {};
     state.mappings = {
       refOldCol: mappings.refOldCol || '',
       refNewCol: mappings.refNewCol || '',
-      targetCols: Array.isArray(mappings.targetCols) ? mappings.targetCols.slice() : []
+      targetCols: Array.isArray(mappings.targetCols) ? mappings.targetCols.slice() : [],
+      languages: {}
     };
+    state.mappings.targetCols.forEach(function (col) {
+      const saved = (mappings.languages && mappings.languages[col]) || {};
+      state.mappings.languages[col] = {
+        label: saved.label || '',
+        newCol: saved.newCol || '',
+        newColName: saved.newColName || ''
+      };
+    });
+    state.exportLangCol = data.exportLangCol || '';
+    state.partialContextCols = Array.isArray(data.partialContextCols) ? data.partialContextCols.slice() : null;
     state.translations = data.translations && typeof data.translations === 'object' ? data.translations : {};
     state.customPromptTemplate = data.customPromptTemplate || null;
     state.pdfTemplate = data.pdfTemplate || null;
     state.activeTargetCol = data.activeTargetCol || state.mappings.targetCols[0] || '';
-    elements.sheetSelectWrapper.style.display = 'none';
+    elements.sheetOptionsWrapper.style.display = 'none';
+    elements.hasHeaderRowCheckbox.checked = state.hasHeaderRow;
 
     renderColumnMappingControls();
-    elements.refOldSelect.value = state.mappings.refOldCol;
-    elements.refNewSelect.value = state.mappings.refNewCol;
-
-    const checkboxes = elements.targetColsContainer.querySelectorAll('input[type="checkbox"]');
-    checkboxes.forEach(function (cb) {
-      cb.checked = state.mappings.targetCols.includes(cb.value);
-    });
-
     renderDataPreview();
 
     // An incomplete mapping (e.g. autosave made while still in Step 1) resumes in Step 1
@@ -2122,6 +2320,25 @@
   }
 
   /**
+   * The header stays sticky only while it fits on one line; the sticky filter toolbar of the
+   * studio sits right below it (CSS variable --sticky-header-h).
+   */
+  function initStickyHeader() {
+    const header = document.querySelector('.app-header');
+    if (!header) return;
+    function update() {
+      header.classList.remove('header-static');
+      const tall = header.offsetHeight > 80;
+      header.classList.toggle('header-static', tall);
+      document.documentElement.style.setProperty('--sticky-header-h', (tall ? 0 : header.offsetHeight) + 'px');
+    }
+    update();
+    window.addEventListener('resize', update);
+    // Labels change length when the UI language is switched
+    elements.langToggleBtn.addEventListener('click', update);
+  }
+
+  /**
    * Close the top-most open modal with Escape or a click on its backdrop.
    */
   function initModalDismissal() {
@@ -2155,6 +2372,7 @@
     initBatchPromptModal();
     initSmartPasteModal();
     initPdfTemplateSettings();
+    initProjectButtons();
     initProjectReset();
 
     // Bulk action buttons
@@ -2175,7 +2393,6 @@
     elements.confirmMappingBtn.addEventListener('click', function () {
       state.mappings.refOldCol = elements.refOldSelect.value;
       state.mappings.refNewCol = elements.refNewSelect.value;
-      updateSelectedTargetCols();
 
       if (!state.mappings.refOldCol || !state.mappings.refNewCol) {
         alert(t('alertSelectRefCols'));
@@ -2190,12 +2407,9 @@
         return;
       }
 
+      finalizeLanguageConfig();
       setStep(2);
       showToast(t('toastMappingSaved'), 'success');
-    });
-
-    elements.autoDetectMappingBtn.addEventListener('click', function () {
-      autoDetectColumnMappings();
     });
 
     elements.goToTranslationBtn.addEventListener('click', function () {
@@ -2207,6 +2421,7 @@
     });
 
     initModalDismissal();
+    initStickyHeader();
 
     // Write a pending (debounced) autosave before the page goes away
     window.addEventListener('pagehide', function () { StorageManager.flushPendingSave(); });

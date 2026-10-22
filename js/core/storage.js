@@ -15,7 +15,7 @@
 
   const STORAGE_KEY = 'ethic_comparator_workspace_v1';
   const PROJECT_APP_ID = 'EthicCodeComparator';
-  const PROJECT_VERSION = '1.1.0';
+  const PROJECT_VERSION = '1.2.0';
   let debounceTimer = null;
   let pendingSave = null; // { state, callback } of the debounced save that has not run yet
 
@@ -60,13 +60,17 @@
     return {
       fileName: state.fileName,
       activeSheet: state.activeSheet,
+      hasHeaderRow: state.hasHeaderRow !== false,
       headers: state.headers,
       rows: state.rows,
-      mappings: state.mappings,
+      rowNumbers: state.rowNumbers,
+      mappings: state.mappings, // { refOldCol, refNewCol, targetCols, languages: { [oldCol]: { label, newCol, newColName } } }
       translations: compactTranslations(state.translations), // { [targetCol]: [ { classification, targetNew, status, isVerified, notes } ] }
       customPromptTemplate: state.customPromptTemplate,
       pdfTemplate: state.pdfTemplate,
-      activeTargetCol: state.activeTargetCol
+      activeTargetCol: state.activeTargetCol,
+      exportLangCol: state.exportLangCol,
+      partialContextCols: state.partialContextCols
     };
   }
 
@@ -139,25 +143,17 @@
 
   function serializeProjectJson(state) {
     const persisted = buildPersistedState(state);
-    const projectData = {
+    const projectData = Object.assign({
       app: PROJECT_APP_ID,
       version: PROJECT_VERSION,
-      exportedAt: new Date().toISOString(),
-      fileName: persisted.fileName || 'kodex_projekt',
-      activeSheet: persisted.activeSheet,
-      headers: persisted.headers,
-      rows: persisted.rows,
-      mappings: persisted.mappings,
-      translations: persisted.translations,
-      customPromptTemplate: persisted.customPromptTemplate,
-      pdfTemplate: persisted.pdfTemplate,
-      activeTargetCol: persisted.activeTargetCol
-    };
+      exportedAt: new Date().toISOString()
+    }, persisted);
+    projectData.fileName = persisted.fileName || 'projekt';
     return JSON.stringify(projectData, null, 2);
   }
 
   function getProjectFileName(state, date) {
-    const safeName = (state.fileName || 'kodex')
+    const safeName = (state.fileName || 'dokument')
       .replace(/\.[^/.]+$/, '')
       .replace(/[\\/:*?"<>|]+/g, '_');
     return `${safeName}_projekt_${(date || new Date()).toISOString().slice(0, 10)}.json`;
@@ -220,9 +216,20 @@
     const mappings = {
       refOldCol: parsed.mappings.refOldCol || '',
       refNewCol: parsed.mappings.refNewCol || '',
-      targetCols: Array.isArray(parsed.mappings.targetCols) ? parsed.mappings.targetCols.slice() : []
+      targetCols: Array.isArray(parsed.mappings.targetCols) ? parsed.mappings.targetCols.slice() : [],
+      languages: {}
     };
-    [mappings.refOldCol, mappings.refNewCol].concat(mappings.targetCols).forEach(function (col) {
+    const savedLanguages = parsed.mappings.languages && typeof parsed.mappings.languages === 'object' ? parsed.mappings.languages : {};
+    mappings.targetCols.forEach(function (col) {
+      const lang = savedLanguages[col] || {};
+      mappings.languages[col] = {
+        label: typeof lang.label === 'string' ? lang.label : '',
+        newCol: typeof lang.newCol === 'string' ? lang.newCol : '',
+        newColName: typeof lang.newColName === 'string' ? lang.newColName : ''
+      };
+    });
+    const languageNewCols = mappings.targetCols.map(function (col) { return mappings.languages[col].newCol; });
+    [mappings.refOldCol, mappings.refNewCol].concat(mappings.targetCols, languageNewCols).forEach(function (col) {
       if (col && headers.indexOf(col) === -1) {
         fail('mapovaný sloupec "' + col + '" v tabulce neexistuje.');
       }
@@ -242,6 +249,9 @@
     result.headers = headers;
     result.mappings = mappings;
     result.translations = translations;
+    result.rowNumbers = Array.isArray(parsed.rowNumbers) && parsed.rowNumbers.length === parsed.rows.length
+      ? parsed.rowNumbers
+      : parsed.rows.map(function (r, idx) { return idx + 2; });
     return result;
   }
 

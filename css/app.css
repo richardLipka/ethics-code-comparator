@@ -206,6 +206,10 @@ html, body {
 .brand-subtitle {
   font-size: 0.75rem;
   color: var(--text-muted);
+  max-width: 340px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .security-badge {
@@ -730,7 +734,8 @@ html, body {
 /* Filter & Toolbar - Sticky with Backdrop Blur */
 .filter-toolbar {
   position: sticky;
-  top: 56px;
+  /* Height of the sticky header, measured by app.js (0 when the header is not sticky) */
+  top: var(--sticky-header-h, 56px);
   z-index: 35;
   display: flex;
   align-items: center;
@@ -897,15 +902,12 @@ html, body {
 
 /* When the header wraps it is taller than the 56px the sticky toolbar assumes, so only the
    filter toolbar stays sticky on narrower screens */
+/* A header that wraps onto several lines would take too much room as a sticky bar */
+.app-header.header-static {
+  position: static;
+}
+
 @media (max-width: 1280px) {
-  .app-header {
-    position: static;
-  }
-
-  .filter-toolbar {
-    top: 0;
-  }
-
   .article-card {
     scroll-margin-top: 140px;
   }
@@ -1383,4 +1385,150 @@ mark.search-highlight {
   border-radius: var(--radius-full);
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+/* Step 1: sheet options and language/column table */
+.sheet-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem 1.5rem;
+  margin-top: 1.25rem;
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.checkbox-label input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+}
+
+.language-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+
+.language-table th {
+  text-align: left;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-muted);
+  padding: 0.4rem 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.language-table td {
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.language-table tr.lang-row-ignored td {
+  color: var(--text-muted);
+}
+
+.language-table tr.lang-row-ignored .lang-col-name {
+  font-weight: 500;
+}
+
+.language-table .lang-col-name {
+  font-weight: 700;
+  color: var(--text-heading);
+  word-break: break-word;
+}
+
+.language-table .form-input,
+.language-table .form-select {
+  padding: 0.3rem 0.5rem;
+  font-size: 0.825rem;
+  min-width: 140px;
+}
+
+.language-table .new-col-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.language-table .new-col-cell .form-select,
+.language-table .new-col-cell .form-input {
+  width: auto;
+  flex: 1 1 170px;
+}
+
+.language-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+}
+
+/* Step 4: shared export language and cards */
+.export-lang-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem 1rem;
+  background-color: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+}
+
+.export-lang-bar .mapping-label {
+  margin: 0;
+}
+
+.export-lang-bar .form-select {
+  max-width: 360px;
+  font-weight: 600;
+}
+
+.export-icon {
+  font-size: 2rem;
+  margin-bottom: 0.5rem;
+}
+
+.export-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-heading);
+  margin-bottom: 0.5rem;
+}
+
+.export-desc {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 0.75rem;
+}
+
+.export-card.export-card-accent {
+  border: 1px solid var(--accent-primary);
+  box-shadow: var(--shadow-md);
+}
+
+.partial-context-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.85rem;
+  margin-bottom: 0.75rem;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.partial-context-list .checkbox-label {
+  font-weight: 500;
+  font-size: 0.8rem;
 }

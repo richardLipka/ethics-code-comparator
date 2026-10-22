@@ -1,18 +1,10 @@
 /**
  * Baterie testů grafického uživatelského rozhraní (GUI Battery Tests)
- * 
- * Ověřuje existenci skutečných dat v DOM, nikoliv pouze návratové hodnoty funkcí:
- * 1. Inicializaci GUI, přepínání jazyků v reálném DOM (CZ/EN)
- * 2. Konfigurovatelnost sloupců v GUI (výběr referenčních sloupců, cílových jazyků, vyloučení z checkboxů)
- * 3. Přehledné zobrazení diffů v GUI (reálné <ins> a <del> značky, německý text, procenta změn)
- * 4. Překladatelské studio: přepínání záložek jazyků, 4-sloupcový layout, živý přepočet diffu cílového jazyka při psaní do textarea
- * 5. Předvyplňovací tlačítka v GUI pro upravené a přidané odstavce
- * 6. Kvalitně generované prompty pro Copilot (stručné, bez zbytečné vaty, s kompletním kontextem a pravidly)
- * 7. Vlastní šablony promptů v GUI
- * 8. Průběh ověřování a progress bary v reálném DOM
- * 9. Ukládání a načítání projektu (.json) s kompletní obnovou dat v DOM
- * 10. Formátovaný PDF export pro jednotlivé jazyky i hromadný export
- * 11. Komplexní a čistý Excel export
+ *
+ * Testy klikají na skutečné ovládací prvky v DOM (jsdom) a kontrolují výsledná data:
+ * výběr sloupců, překladové studio, prompty a Smart Paste, ukládání projektu tlačítky v záhlaví,
+ * autosave, exporty do Excelu (kompletní, nová verze, částečný), dokument pro tisk
+ * a shrnutí změn pro vybraný jazyk.
  */
 
 const fs = require('fs');
@@ -64,13 +56,14 @@ function toastTexts(document) {
   return Array.from(document.querySelectorAll('#toastContainer .toast')).map(t => t.textContent);
 }
 
-// Loads the sample, confirms the mapping and opens the CS 2024 tab of the studio
+// Loads the sample, confirms the mapping and opens the CS tab of the studio
 function openCzechStudio(window) {
   const document = window.document;
   document.getElementById('loadSampleBtn').click();
   document.getElementById('confirmMappingBtn').click();
   document.getElementById('goToTranslationBtn').click();
-  const csTab = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab')).find(t => t.textContent.includes('CS 2024'));
+  const csTab = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'))
+    .find(t => t.querySelector('span').textContent === 'CS');
   csTab.click();
 }
 
@@ -181,997 +174,671 @@ function createDomEnvironment(options) {
 
 // BATERIE TESTŮ
 
+const NodeXLSX = require('xlsx');
+
+function langRow(document, col) {
+  return Array.from(document.querySelectorAll('#languagesTableBody tr')).find(tr => tr.getAttribute('data-col') === col);
+}
+
+function workbookFile(window, sheets, name) {
+  const wb = NodeXLSX.utils.book_new();
+  Object.keys(sheets).forEach(sheetName => {
+    NodeXLSX.utils.book_append_sheet(wb, NodeXLSX.utils.aoa_to_sheet(sheets[sheetName]), sheetName);
+  });
+  const buf = NodeXLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+  return new window.File([buf], name || 'data.xlsx');
+}
+
+function setSelect(window, select, value) {
+  select.value = value;
+  if (select.onchange) select.onchange();
+  else select.dispatchEvent(new window.Event('change'));
+}
+
 // TEST 1: Inicializace GUI a přepínání jazyků
-runTest('GUI Boot: Správné výchozí zobrazení a přepínání jazyků CZ/EN v DOM', () => {
+runTest('GUI Boot: výchozí zobrazení, obecné texty a přepínání jazyků CZ/EN', () => {
   const { document } = createDomEnvironment();
 
-  // Výchozí jazyk je čeština
-  assert.strictEqual(document.documentElement.getAttribute('lang'), 'cs', 'Výchozí lang atribut musí být cs');
-  
-  const stepNav1 = document.getElementById('stepNav1');
-  assert.ok(stepNav1.classList.contains('active'), 'Navigace kroku 1 je aktivní');
+  assert.strictEqual(document.documentElement.getAttribute('lang'), 'cs');
+  assert.ok(document.getElementById('stepNav1').classList.contains('active'));
+  assert.strictEqual(document.querySelector('.brand-title').textContent, 'Srovnávač verzí & Překladový asistent');
+  assert.ok(!/etick|kodex|němčin|2024|2026/i.test(document.body.textContent), 'Rozhraní nepředpokládá etický kodex, němčinu ani roky');
 
   const langBtn = document.getElementById('langToggleBtn');
-  assert.ok(langBtn, 'Tlačítko přepnutí jazyka existuje');
-  assert.strictEqual(langBtn.textContent.trim(), '🇬🇧 English', 'Tlačítko v češtině nabízí přepnutí do EN');
-
-  // Kliknutí na přepínač jazyka -> EN
+  assert.strictEqual(langBtn.textContent.trim(), '🇬🇧 English');
   langBtn.click();
-  assert.strictEqual(document.documentElement.getAttribute('lang'), 'en', 'Lang atribut se musí změnit na en');
-  assert.strictEqual(langBtn.textContent.trim(), '🇨🇿 Čeština', 'Tlačítko v EN nabízí přepnutí do CS');
-  
-  // Kontrola reálného textu v DOM po překladu
-  const dropzoneTitle = document.querySelector('[data-i18n="dropzoneTitle"]');
-  assert.strictEqual(dropzoneTitle.textContent.trim(), 'Drag & drop Excel file (.xlsx, .xls) here or click to browse', 'Text dropzone musí být v angličtině');
-
-  // Přepnutí zpět do češtiny
+  assert.strictEqual(document.documentElement.getAttribute('lang'), 'en');
+  assert.strictEqual(langBtn.textContent.trim(), '🇨🇿 Čeština');
+  assert.strictEqual(document.querySelector('[data-i18n="dropzoneTitle"]').textContent.trim(), 'Drag & drop a file (.xlsx, .xls, .csv) here or click to browse');
+  assert.strictEqual(document.getElementById('saveProjectBtn').textContent, '💾 Save project');
   langBtn.click();
-  assert.strictEqual(document.documentElement.getAttribute('lang'), 'cs', 'Lang atribut se musí vrátit na cs');
-  assert.strictEqual(dropzoneTitle.textContent.trim(), 'Přetáhněte sem Excel soubor (.xlsx, .xls) nebo klikněte pro výběr', 'Text dropzone musí být v češtině');
+  assert.strictEqual(document.getElementById('loadProjectBtn').textContent, '📂 Načíst projekt');
 });
 
-// TEST 2: Načtení ukázkových dat a zobrazení reálných sloupců
-runTest('Column Detection: Načtení dat zobrazí v GUI reálné sloupce a správné výchozí mapování', () => {
+// TEST 2: Výběr sloupců – tabulka použitých a ignorovaných sloupců
+runTest('Column Table: ukázková data – reference, 10 jazyků s názvy, ignorované sloupce', () => {
   const { document } = createDomEnvironment();
+  document.getElementById('loadSampleBtn').click();
 
-  const loadSampleBtn = document.getElementById('loadSampleBtn');
-  loadSampleBtn.click();
+  assert.strictEqual(document.getElementById('mappingContainer').style.display, 'block');
+  assert.strictEqual(document.getElementById('refOldSelect').value, 'DE 2024 (Referenz)');
+  assert.strictEqual(document.getElementById('refNewSelect').value, 'DE 2026 (Referenz)');
 
-  const mappingContainer = document.getElementById('mappingContainer');
-  assert.strictEqual(mappingContainer.style.display, 'block', 'Mapovací kontejner se musí zobrazit');
-
-  const refOldSelect = document.getElementById('refOldSelect');
-  const refNewSelect = document.getElementById('refNewSelect');
-
-  assert.strictEqual(refOldSelect.value, 'DE 2024 (Referenz)', 'refOldSelect musí mít vybranou DE 2024 (Referenz)');
-  assert.strictEqual(refNewSelect.value, 'DE 2026 (Referenz)', 'refNewSelect musí mít vybranou DE 2026 (Referenz)');
-
-  // Ověření všech 14 sloupců v možnostech selectu
-  const options = Array.from(refOldSelect.options).map(o => o.value).filter(v => v);
-  assert.strictEqual(options.length, 14, 'Select musí obsahovat všech 14 sloupců ze souboru');
-  assert.ok(options.includes('CS 2024'), 'Obsahuje CS 2024');
-  assert.ok(options.includes('EN 2024'), 'Obsahuje EN 2024');
-  assert.ok(options.includes('FR 2024'), 'Obsahuje FR 2024');
-
-  // Ověření cílových jazyků v checkboxy kontejneru (12 sloupců, mimo DE 2024 a DE 2026)
-  const checkboxes = document.querySelectorAll('#targetColsContainer input[type="checkbox"]');
-  assert.strictEqual(checkboxes.length, 12, 'Musí existovat 12 cílových jazykových checkboxů');
-
-  const checkedValues = Array.from(checkboxes).filter(cb => cb.checked).map(cb => cb.value);
-  assert.ok(checkedValues.includes('CS 2024'), 'Čeština je vybrána jako cílový jazyk');
-  assert.ok(checkedValues.includes('EN 2024'), 'Angličtina je vybrána jako cílový jazyk');
+  const rows = Array.from(document.querySelectorAll('#languagesTableBody tr'));
+  assert.strictEqual(rows.length, 12, 'Každý sloupec kromě dvou referenčních má řádek');
+  const used = rows.filter(r => r.querySelector('.lang-use-cb').checked).map(r => r.getAttribute('data-col'));
+  assert.strictEqual(used.length, 10);
+  assert.ok(!used.includes('Artikel-Nr.') && !used.includes('Bereich'), 'Ostatní sloupce jsou ignorovány');
+  assert.strictEqual(langRow(document, 'CS 2024').querySelector('.lang-label-input').value, 'CS', 'Název jazyka bez čísla verze');
+  assert.ok(langRow(document, 'Bereich').textContent.includes('ignorováno'));
+  assert.strictEqual(langRow(document, 'CS 2024').querySelector('.lang-newcol-select').value, '', 'Bez existujícího sloupce se vytvoří nový');
+  assert.strictEqual(langRow(document, 'CS 2024').querySelector('.lang-newname-input').placeholder, 'CS 2026');
 });
 
-// TEST 3: Konfigurovatelnost sloupců v GUI (změna referenčních sloupců a aktualizace checkboxů)
-runTest('Column Reconfigurability: Změna referenčních sloupců dynamicky aktualizuje dostupné cílové jazyky', () => {
+runTest('Column Table: vypnutí jazyka, vlastní název, existující sloupec nové verze a změna reference', () => {
   const { window, document } = createDomEnvironment();
-
+  const state = () => window.__app.state;
   document.getElementById('loadSampleBtn').click();
 
-  const refOldSelect = document.getElementById('refOldSelect');
-  const refNewSelect = document.getElementById('refNewSelect');
+  // Vypnutí jazyka
+  const plCb = langRow(document, 'PL 2024').querySelector('.lang-use-cb');
+  plCb.checked = false;
+  plCb.dispatchEvent(new window.Event('change'));
+  assert.ok(!state().mappings.targetCols.includes('PL 2024'));
+  assert.ok(langRow(document, 'PL 2024').textContent.includes('ignorováno'));
 
-  // Uživatel změní refOldSelect na EN 2024
-  refOldSelect.value = 'EN 2024';
-  if (refOldSelect.onchange) refOldSelect.onchange();
-  refOldSelect.dispatchEvent(new window.Event('change'));
+  // Vlastní název jazyka
+  const label = langRow(document, 'CS 2024').querySelector('.lang-label-input');
+  label.value = 'Čeština';
+  label.dispatchEvent(new window.Event('input'));
+  assert.strictEqual(state().mappings.languages['CS 2024'].label, 'Čeština');
 
-  // EN 2024 nesmí být mezi cílovými checkboxy
-  let checkboxes = Array.from(document.querySelectorAll('#targetColsContainer input[type="checkbox"]'));
-  let cbValues = checkboxes.map(cb => cb.value);
-  assert.strictEqual(cbValues.includes('EN 2024'), false, 'EN 2024 nesmí být mezi cílovými jazyky, pokud je referencí');
-  assert.strictEqual(cbValues.includes('DE 2024 (Referenz)'), true, 'DE 2024 (Referenz) musí být nyní dostupná jako cílový jazyk');
+  // Existující sloupec jako nová verze jazyka (nabízí jen nepoužité sloupce)
+  const select = langRow(document, 'CS 2024').querySelector('.lang-newcol-select');
+  const offered = Array.from(select.options).map(o => o.value);
+  assert.ok(offered.includes('PL 2024') && offered.includes('Bereich'));
+  assert.ok(!offered.includes('EN 2024') && !offered.includes('DE 2024 (Referenz)'), 'Použité a referenční sloupce nejsou nabízeny');
+  setSelect(window, select, 'PL 2024');
+  assert.strictEqual(state().mappings.languages['CS 2024'].newCol, 'PL 2024');
+  const paired = langRow(document, 'PL 2024');
+  assert.ok(paired.textContent.includes('nová verze jazyka Čeština'));
+  assert.ok(paired.querySelector('.lang-use-cb').disabled, 'Sloupec nové verze nelze zároveň použít jako jazyk');
 
-  // Vrátíme na standardní německou referenci
-  refOldSelect.value = 'DE 2024 (Referenz)';
-  if (refOldSelect.onchange) refOldSelect.onchange();
-  refOldSelect.dispatchEvent(new window.Event('change'));
-
-  refNewSelect.value = 'DE 2026 (Referenz)';
-  if (refNewSelect.onchange) refNewSelect.onchange();
-  refNewSelect.dispatchEvent(new window.Event('change'));
-
-  checkboxes = Array.from(document.querySelectorAll('#targetColsContainer input[type="checkbox"]'));
-  cbValues = checkboxes.map(cb => cb.value);
-  assert.strictEqual(cbValues.includes('DE 2024 (Referenz)'), false, 'DE 2024 nesmí být mezi cílovými checkboxy');
-  assert.strictEqual(cbValues.includes('DE 2026 (Referenz)'), false, 'DE 2026 nesmí být mezi cílovými checkboxy');
-  assert.strictEqual(cbValues.includes('CS 2024'), true, 'CS 2024 je mezi cílovými checkboxy');
-
-  // Vybereme pouze CS 2024 a FR 2024
-  checkboxes.forEach(cb => {
-    cb.checked = (cb.value === 'CS 2024' || cb.value === 'FR 2024');
-    cb.dispatchEvent(new window.Event('change'));
-  });
-
-  // Potvrdit mapování
-  document.getElementById('confirmMappingBtn').click();
-
-  const step2 = document.getElementById('step2Section');
-  assert.strictEqual(step2.style.display, 'block', 'Krok 2 musí být po potvrzení aktivní');
+  // Změna reference: sloupec se stane referencí a zmizí z jazyků
+  setSelect(window, document.getElementById('refOldSelect'), 'EN 2024');
+  assert.ok(!state().mappings.targetCols.includes('EN 2024'));
+  assert.ok(!langRow(document, 'EN 2024'), 'Referenční sloupec není v tabulce jazyků');
+  assert.ok(langRow(document, 'DE 2024 (Referenz)'), 'Dřívější reference je teď běžný sloupec');
 });
 
-// TEST 4: Krok 2 - Přehledné zobrazení německých diffů se skutečnými daty v GUI
-runTest('Diff Display Step 2: Tabulka změn v Kroku 2 obsahuje reálná data, <ins> a <del> značky', () => {
+// TEST 4: Krok 2
+runTest('Step 2: tabulka změn reference s čísly řádků a <ins>/<del>', () => {
   const { document } = createDomEnvironment();
-
   document.getElementById('loadSampleBtn').click();
   document.getElementById('confirmMappingBtn').click();
 
-  // Ověření celkového počtu řádků v KPI kartách
-  assert.strictEqual(document.getElementById('kpiTotalRows').textContent, '15', 'KPI celkem řádků musí být 15');
-  
-  const modifiedKpi = parseInt(document.getElementById('kpiModified').textContent, 10);
-  assert.ok(modifiedKpi > 0, 'Počet upravených řádků musí být větší než 0');
-
-  // Kontrola řádků tabulky v DOM
+  assert.strictEqual(document.getElementById('kpiTotalRows').textContent, '15');
+  assert.strictEqual(document.getElementById('kpiModified').textContent, '6');
   const rows = document.querySelectorAll('#refDiffTableBody tr');
-  assert.strictEqual(rows.length, 15, 'V tabulce musí být vygenerováno přesně 15 řádků');
-
-  // Řádek 1 (Art. 01)
-  const row1 = rows[0];
-  const row1Label = row1.querySelector('td:nth-child(1)').textContent;
-  assert.ok(row1Label.includes('Art. 01'), 'První řádek obsahuje identifikátor Art. 01');
-  assert.ok(row1Label.includes('Präambel'), 'První řádek obsahuje název sekce Präambel');
-
-  // Řádek 3 (Art. 03 - Chancengleichheit) obsahuje změny (Geschlechtsidentität, Alter, ausnahmslos vs Rasse)
-  const row3 = rows[2];
-  const diffBox3 = row3.querySelector('.diff-box');
-  assert.ok(diffBox3, 'Diff box musí existovat');
-  assert.ok(diffBox3.innerHTML.includes('<ins class="diff-ins"'), 'Obsahuje <ins class="diff-ins">');
-  assert.ok(diffBox3.innerHTML.includes('Geschlechtsidentität'), 'Zeleně zvýrazněno slovo Geschlechtsidentität');
-  assert.ok(diffBox3.innerHTML.includes('<del class="diff-del"'), 'Obsahuje <del class="diff-del">');
-  assert.ok(diffBox3.innerHTML.includes('Rasse'), 'Červeně škrtnuto slovo Rasse');
-
-  // Řádek 4 (Art. 04 - Dary 35 vs 50 Euro)
-  const row4 = rows[3];
-  const diffBox4 = row4.querySelector('.diff-box');
-  assert.ok(diffBox4.innerHTML.includes('<ins class="diff-ins"'), 'Obsahuje ins tag');
-  assert.ok(diffBox4.innerHTML.includes('50') && diffBox4.innerHTML.includes('diff-ins'), 'Zeleně zvýrazněno 50');
-  assert.ok(diffBox4.innerHTML.includes('35') && diffBox4.innerHTML.includes('diff-del'), 'Červeně škrtnuto 35');
-
-  // Řádek 8 (Art. 08 - AI Etika) byl přidán (2024 prázdné, 2026 text)
-  const row8 = rows[7];
-  const badge8 = row8.querySelector('.badge-added');
-  assert.ok(badge8, 'Řádek 8 má odznak PŘIDÁNO');
-  assert.ok(row8.innerHTML.includes('Künstliche Intelligenz'), 'Řádek 8 obsahuje text o umělé inteligenci');
-
-  // Řádek 10 (Art. 10 - Pandemie) byl smazán (2024 text, 2026 prázdné)
-  const row10 = rows[9];
-  const badge10 = row10.querySelector('.badge-removed');
-  assert.ok(badge10, 'Řádek 10 má odznak SMAZÁNO');
-  assert.ok(row10.innerHTML.includes('<del class="diff-del"'), 'Smazaný řádek je přeškrtnut');
+  assert.strictEqual(rows.length, 15);
+  assert.strictEqual(rows[0].querySelector('td').textContent.trim(), 'Řádek 2', 'Odstavec je označen číslem řádku v Excelu');
+  assert.ok(!rows[0].querySelector('td').textContent.includes('Art.'), 'Nepředpokládá se sloupec s nadpisem');
+  const diff4 = rows[3].querySelector('.diff-box').innerHTML;
+  assert.ok(diff4.includes('<ins class="diff-ins"') && diff4.includes('<del class="diff-del"') && diff4.includes('50') && diff4.includes('35'));
+  assert.ok(rows[7].querySelector('.badge-added') && rows[9].querySelector('.badge-removed'));
 });
 
-// TEST 5: Krok 3 - Překladatelské studio a 4-sloupcový layout s reálnými daty
-runTest('Translation Studio Step 3: Zobrazení jazykových záložek, přepnutí na češtinu a 4 sloupce s reálným textem', () => {
-  const { document } = createDomEnvironment();
+// TEST 5: Krok 3
+runTest('Studio: záložky s názvy jazyků, karta bez nadpisů a bez duplicitního textu nad editorem', () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
 
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
+  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab')).map(t => t.textContent.replace(/\s+/g, ' ').trim());
+  assert.ok(tabs[0].startsWith('EN') && tabs.some(t => t.startsWith('CS ')), 'Záložky ukazují názvy jazyků');
+  assert.ok(document.querySelector('#langTabsWrapper .lang-tab.active').textContent.includes('CS'));
 
-  const step3 = document.getElementById('step3Section');
-  assert.strictEqual(step3.style.display, 'block', 'Krok 3 musí být aktivní');
-
-  // Ověření záložek jazyků v DOM
-  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  assert.ok(tabs.length >= 2, 'Záložky jazyků musí být vykresleny');
-  
-  // Klikneme na záložku CS 2024 (Čeština)
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  assert.ok(csTab, 'Záložka pro CS 2024 existuje');
-  csTab.click();
-
-  const activeTab = document.querySelector('#langTabsWrapper .lang-tab.active');
-  assert.ok(activeTab && activeTab.textContent.includes('CS 2024'), 'Záložka CS 2024 je aktivní v DOM');
-
-  // Ověření karet článků v DOM
   const cards = document.querySelectorAll('#articlesContainer .article-card');
-  assert.strictEqual(cards.length, 15, 'Musí být vykresleno 15 karet článků');
-
-  // Kontrola 4 sloupců pro Art. 04 (Dary)
+  assert.strictEqual(cards.length, 15);
   const card4 = document.getElementById('article-card-3');
-  const subPanels = card4.querySelectorAll('.sub-panel');
-  assert.strictEqual(subPanels.length, 4, 'Karta musí obsahovat přesně 4 sloupce');
+  const header = card4.querySelector('.article-header');
+  assert.strictEqual(header.querySelector('.article-id').textContent, 'Řádek 5');
+  assert.ok(!header.querySelector('.article-section'), 'Žádný nadpis odstavce');
+  assert.ok(!header.textContent.includes('Geschenke'), 'Text buňky se nad editorem neopakuje');
 
-  // Sloupec 1: Německý diff
-  assert.ok(subPanels[0].innerHTML.includes('diff-ins'), 'Sloupec 1 obsahuje zvýrazněný německý diff');
-  assert.ok(subPanels[0].innerHTML.includes('50'), 'Sloupec 1 obsahuje 50');
-
-  // Sloupec 2: Původní ověřený český překlad
-  assert.ok(subPanels[1].textContent.includes('Dary a pozvání'), 'Sloupec 2 obsahuje původní český překlad 2024');
-  assert.ok(subPanels[1].textContent.includes('35 eur'), 'Sloupec 2 obsahuje 35 eur');
-
-  // Sloupec 3: Editor překladu 2026 s textarea
-  const textarea = subPanels[2].querySelector('textarea.target-textarea');
-  assert.ok(textarea, 'Sloupec 3 obsahuje textarea editor');
-
-  // Sloupec 4: Živý diff cílového jazyka
-  const liveDiffBox = subPanels[3].querySelector('.live-target-diff');
-  assert.ok(liveDiffBox, 'Sloupec 4 obsahuje box živého diffu');
+  const panels = card4.querySelectorAll('.sub-panel');
+  assert.strictEqual(panels.length, 4);
+  assert.ok(panels[0].textContent.includes('Reference (DE 2026 (Referenz))'));
+  assert.ok(panels[1].textContent.includes('Stará verze – CS') && panels[1].textContent.includes('35 eur'));
+  assert.ok(panels[2].querySelector('textarea.target-textarea') && panels[2].textContent.includes('Nová verze – CS'));
+  assert.ok(panels[3].querySelector('.live-target-diff').textContent.includes('Zatím bez nové verze'));
 });
 
-// TEST 6: Živý přepočet diffu cílového jazyka při editaci v reálném DOM
-runTest('Live Target Diff: Psaní do textarea okamžitě v reálném čase aktualizuje <ins> a <del> v DOM', () => {
+runTest('Studio: živý diff při psaní a předvyplňovací tlačítka', () => {
   const { window, document } = createDomEnvironment();
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  // Přepneme na záložku CS 2024
-  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  csTab.click();
-
-  // Vybereme kartu 4 (Art. 04 - Dary do 35 eur změněno na 50 eur)
-  const card4 = document.getElementById('article-card-3');
-  assert.ok(card4, 'Karta pro článek 4 existuje');
-
-  const textarea = card4.querySelector('textarea.target-textarea');
-  const liveDiffBox = card4.querySelector('.live-target-diff');
-
-  // Původní český text má "35 eur"
-  const oldText = card4.querySelectorAll('.sub-panel')[1].textContent;
-  assert.ok(oldText.includes('35 eur'), 'Původní text obsahuje 35 eur');
-
-  // Uživatel zadá upravený text s 50 eur
-  const newCzechText = 'Dary a pozvání lze přijmout pouze tehdy, pokud jejich hodnota nepřesahuje 50 eur a byly předem schváleny přes portál compliance.';
-  textarea.value = newCzechText;
-  
-  // Vyvoláme událost input (psaní uživatele)
-  textarea.dispatchEvent(new window.Event('input'));
-
-  // Okamžitá kontrola DOMu ve sloupci 4
-  assert.ok(liveDiffBox.innerHTML.includes('<ins class="diff-ins"'), 'Sloupec 4 musí obsahovat zelený <ins> tag');
-  assert.ok(liveDiffBox.innerHTML.includes('50') && liveDiffBox.innerHTML.includes('diff-ins'), 'Zeleně je zvýrazněno nově napsané 50');
-  assert.ok(liveDiffBox.innerHTML.includes('<del class="diff-del"'), 'Sloupec 4 musí obsahovat červený <del> tag');
-  assert.ok(liveDiffBox.innerHTML.includes('35') && liveDiffBox.innerHTML.includes('diff-del'), 'Červeně je škrtnuto původní 35');
-});
-
-// TEST 7: Předvyplňovací tlačítka v GUI (Kopírovat 2024 / Kopírovat DE)
-runTest('Prefill Buttons: Tlačítka pro předvyplnění správně vloží text do textarea a vyvolají diff', () => {
-  const { document } = createDomEnvironment();
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  // Přepneme na záložku CS 2024
-  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  csTab.click();
-
-  // Článek 4 (Art. 04) je MODIFIED, má tlačítko .prefill-old-btn
-  const card4 = document.getElementById('article-card-3');
-  const textarea = card4.querySelector('textarea.target-textarea');
-  const prefillOldBtn = card4.querySelector('.prefill-old-btn');
-
-  assert.ok(prefillOldBtn, 'Tlačítko pro předvyplnění z 2024 existuje na upraveném článku');
-  
-  // Kliknutí na předvyplnit z 2024
-  prefillOldBtn.click();
-
-  assert.ok(textarea.value.includes('Dary a pozvání'), 'Textarea byla naplněna původním českým textem');
-  assert.ok(textarea.value.includes('35 eur'), 'Textarea obsahuje 35 eur z roku 2024');
-
-  // Sloupec 4 živý diff byl aktualizován
-  const liveDiffBox = card4.querySelector('.live-target-diff');
-  assert.ok(liveDiffBox.textContent.length > 0, 'Živý diff byl přepočítán');
-});
-
-// TEST 8: Kvalitně generované prompty pro Copilot (stručné, účelné, kompletní kontext)
-runTest('Copilot Prompt Quality: Generovaný prompt je výstižný, neobsahuje zbytečný balast a obsahuje všechna data', () => {
-  const { window, document } = createDomEnvironment();
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  // Přepneme na záložku CS 2024
-  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  csTab.click();
-
-  const card4 = document.getElementById('article-card-3');
-  const copyPromptBtn = card4.querySelector('.copy-prompt-btn');
-  assert.ok(copyPromptBtn, 'Tlačítko pro kopírování promptu existuje');
-
-  // Kliknutí na tlačítko pro kopírování promptu
-  copyPromptBtn.click();
-
-  const prompt = window.getLastCopiedText();
-  assert.ok(prompt.length > 0, 'Prompt byl úspěšně vygenerován');
-
-  // Ověření přesných klíčových součástí
-  assert.ok(prompt.includes('CS 2024'), 'Prompt obsahuje cílový jazyk');
-  assert.ok(prompt.includes('Art. 04'), 'Prompt obsahuje identifikátor odstavce');
-  assert.ok(prompt.includes('35 Euro'), 'Prompt obsahuje původní německý text');
-  assert.ok(prompt.includes('50 Euro'), 'Prompt obsahuje nový německý text');
-  assert.ok(prompt.includes('35 eur'), 'Prompt obsahuje dosavadní ověřený překlad');
-  
-  // Ověření instrukcí pro minimální změny a čistý výstup
-  assert.ok(prompt.includes('POUZE minimální nutné změny'), 'Obsahuje pravidlo minimálních změn');
-  assert.ok(prompt.includes('POUZE vraťte výsledný text'), 'Obsahuje příkaz nevracet konverzační úvod');
-
-  // Ověření, že prompt není zbytečně dlouhý (méně než 1600 znaků pro standardní článek)
-  assert.ok(prompt.length < 1600, `Prompt je stručný a efektivní (délka: ${prompt.length} znaků)`);
-
-  // Toast notifikace se zobrazila v DOM
-  const toast = document.querySelector('#toastContainer .toast');
-  assert.ok(toast, 'Toast notifikace se zobrazila v DOM');
-});
-
-// TEST 9: Vlastní šablona promptu v GUI
-runTest('Custom Prompt Template: Změna šablony v modálním okně se projeví při generování promptu', () => {
-  const { window, document } = createDomEnvironment();
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  // Přepneme na záložku CS 2024
-  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  csTab.click();
-
-  // Nastavíme vlastní šablonu v nastavení
-  const templateInput = document.getElementById('promptTemplateInput');
-  const saveBtn = document.getElementById('savePromptTemplateBtn');
-
-  templateInput.value = 'AI_TRANSLATE: {TARGET_LANG} | {ROW_ID} | NEW_DE: {REF_NEW} | OLD_TRANS: {TARGET_OLD}';
-  saveBtn.click();
-
-  // Vygenerujeme prompt pro kartu 4
-  const card4 = document.getElementById('article-card-3');
-  card4.querySelector('.copy-prompt-btn').click();
-
-  const prompt = window.getLastCopiedText();
-  assert.ok(prompt.startsWith('AI_TRANSLATE: CS 2024 | Art. 04'), 'Prompt se přesně řídí uživatelskou šablonou');
-  assert.ok(prompt.includes('50 Euro'), 'Šablona správně dosadila {REF_NEW}');
-});
-
-// TEST 10: Schvalování překladů a progress bar v reálném DOM
-runTest('Verification Workflow: Označení odstavce jako ověřený aktualizuje třídy karty a progress bar v DOM', () => {
-  const { window, document } = createDomEnvironment();
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  // Přepneme na záložku CS 2024
-  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  csTab.click();
-
-  // Vybereme kartu 4 (která je pending, protože je MODIFIED)
-  const card4 = document.getElementById('article-card-3');
-  const checkbox = card4.querySelector('.verify-checkbox');
-  const progressBar = document.getElementById('currentLangProgressBar');
-  const progressText = document.getElementById('currentLangProgressText');
-
-  // Původní stav
-  const initialWidth = progressBar.style.width;
-
-  // Zaškrtneme jako ověřeno
-  checkbox.checked = true;
-  checkbox.dispatchEvent(new window.Event('change'));
-
-  // Kontrola DOMu
-  assert.ok(card4.classList.contains('status-verified'), 'Karta má třídu status-verified');
-  assert.ok(!card4.classList.contains('status-pending'), 'Karta již nemá třídu status-pending');
-  assert.ok(progressBar.style.width !== initialWidth, 'Progress bar se posunul');
-  assert.ok(progressText.textContent.includes('hotovo'), 'Progress text indikuje hotové odstavce');
-});
-
-// TEST 11: Ukládání a načítání projektu (.json) s kompletní obnovou GUI stavu
-runTest('Project Save & Load: Export do JSON a zpětné načtení kompletně obnoví reálná data a stav v GUI', async () => {
-  const env1 = createDomEnvironment();
-
-  env1.document.getElementById('loadSampleBtn').click();
-  env1.document.getElementById('confirmMappingBtn').click();
-  env1.document.getElementById('goToTranslationBtn').click();
-
-  // Přepneme na záložku CS 2024
-  const tabs = Array.from(env1.document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  csTab.click();
-
-  // Uživatel upraví článek 4
-  const card4 = env1.document.getElementById('article-card-3');
-  const textarea4 = card4.querySelector('textarea.target-textarea');
-  textarea4.value = 'MŮJ TESTOVACÍ ČESKÝ PŘEKLAD 2026 PRO ČLÁNEK 4 - DARY 50 EUR';
-  textarea4.dispatchEvent(new env1.window.Event('input'));
-
-  const cb4 = card4.querySelector('.verify-checkbox');
-  cb4.checked = true;
-  cb4.dispatchEvent(new env1.window.Event('change'));
-
-  // Uživatel upraví šablonu PDF (musí být součástí projektu)
-  env1.window.__app.state.pdfTemplate = { companyName: 'Projektová Firma s.r.o.', accentColor: '#123456' };
-
-  // Export projektu tlačítkem v Kroku 4 → zachycený stažený soubor
-  env1.document.getElementById('goToExportBtn').click();
-  env1.document.getElementById('exportProjectJsonBtn').click();
-  const download = env1.window.__downloads.pop();
-  assert.ok(download && /_projekt_\d{4}-\d{2}-\d{2}\.json$/.test(download.name), 'Stáhne se soubor projektu .json');
-  const projectData = await readBlobText(env1.window, download.blob);
-  assert.ok(projectData.includes('MŮJ TESTOVACÍ ČESKÝ PŘEKLAD 2026 PRO ČLÁNEK 4'), 'JSON obsahuje upravený text');
-
-  // Nové čisté prostředí: načtení přes stejnou cestu jako výběr souboru v GUI
-  const env2 = createDomEnvironment();
-  env2.window.__app.loadProjectFile(new env2.window.File([projectData], download.name, { type: 'application/json' }));
-  await sleep(50);
-  assert.strictEqual(env2.window.__lastAlert, undefined, 'Načtení nesmí skončit chybou: ' + env2.window.__lastAlert);
-  assert.ok(toastTexts(env2.document).some(t => t.includes('úspěšně načten')), 'Zobrazí se potvrzení o načtení');
-  assert.deepStrictEqual(plain(env2.window.__app.state.pdfTemplate), { companyName: 'Projektová Firma s.r.o.', accentColor: '#123456' }, 'Šablona PDF byla obnovena');
-
-  // Kontrola, že GUI přešlo do Kroku 3 a otevřelo naposledy aktivní jazyk
-  assert.strictEqual(env2.document.getElementById('step3Section').style.display, 'block', 'Po obnovení je aktivní Krok 3');
-  assert.ok(env2.document.querySelector('#langTabsWrapper .lang-tab.active').textContent.includes('CS 2024'), 'Aktivní je jazyk CS 2024');
-  const restoredStub = env2.window.__app.state.translations['CS 2024'][3];
-  assert.ok(restoredStub.targetOld.includes('35 eur'), 'Původní překlad 2024 byl doplněn z řádků tabulky');
-  assert.strictEqual(restoredStub.classification, 'MODIFIED');
-
-  // Kontrola konkrétních dat v DOMu
-  const restoredCard4 = env2.document.getElementById('article-card-3');
-  assert.ok(restoredCard4, 'Karta 4 byla obnovena');
-  
-  const restoredTextarea4 = restoredCard4.querySelector('textarea.target-textarea');
-  assert.strictEqual(restoredTextarea4.value, 'MŮJ TESTOVACÍ ČESKÝ PŘEKLAD 2026 PRO ČLÁNEK 4 - DARY 50 EUR', 'Skutečný text v textarea byl věrně obnoven');
-
-  const restoredCb4 = restoredCard4.querySelector('.verify-checkbox');
-  assert.strictEqual(restoredCb4.checked, true, 'Checkbox ověření zůstal zaškrtnutý');
-  assert.ok(restoredCard4.classList.contains('status-verified'), 'Karta má status-verified');
-});
-
-// TEST 12: Krok 4 - Formátovaný PDF export se skutečnými daty
-runTest('Formatted PDF Export: Vygenerovaný tiskový HTML/PDF dokument obsahuje formátování A4 a texty kodexu', async () => {
-  const { window, document } = createDomEnvironment();
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  // Přepneme na záložku CS 2024
-  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
-  const csTab = tabs.find(t => t.textContent.includes('CS 2024'));
-  csTab.click();
-
-  // Upravíme článek 4
-  const card4 = document.getElementById('article-card-3');
-  const textarea4 = card4.querySelector('textarea.target-textarea');
-  textarea4.value = 'Finální ověřený text článku 4 v češtině pro rok 2026 (dary do 50 EUR).';
-  textarea4.dispatchEvent(new window.Event('input'));
-
-  // Přechod do Kroku 4
-  document.getElementById('goToExportBtn').click();
-  assert.strictEqual(document.getElementById('step4Section').style.display, 'block', 'Krok 4 je zobrazen');
-
-  // Tisk přes tlačítko v Kroku 4 pro vybraný jazyk → zachycené tiskové okno
-  const pdfLangSelect = document.getElementById('pdfLangSelect');
-  assert.strictEqual(pdfLangSelect.value, 'CS 2024', 'Výběr jazyka pro PDF je předvyplněn aktivním jazykem');
-  document.getElementById('printPdfBtn').click();
-  const printWindow = window.__printWindows.pop();
-  assert.ok(printWindow, 'Otevře se tiskové okno');
-  await sleep(350);
-  assert.ok(printWindow.printed, 'Automaticky se vyvolá tiskový dialog');
-  const printableHtml = printWindow.html;
-
-  assert.ok(printableHtml.includes('size: A4'), 'Obsahuje formátovací CSS pravidla pro A4');
-  assert.ok(printableHtml.toLowerCase().includes('etický kodex'), 'Obsahuje hlavní nadpis kodexu');
-  assert.ok(printableHtml.includes('CS 2026'), 'Obsahuje informaci o jazykové mutaci');
-  assert.ok(printableHtml.includes('Finální ověřený text článku 4 v češtině pro rok 2026 (dary do 50 EUR).'), 'Obsahuje skutečný editovaný text');
-  assert.ok(printableHtml.includes('Vedení společnosti'), 'Obsahuje podpisový blok vedení');
-  assert.ok(!printableHtml.includes('Telefax'), 'Neobsahuje smazaný článek 15 o telefaxu');
-  // Ostatní upravené články nejsou přeložené ani ověřené → dokument je zřetelně koncept
-  assert.ok(printableHtml.includes('KONCEPT'), 'Neúplný překlad je označen jako koncept');
-  const art7Old = window.__app.state.rows[6]['CS 2024'];
-  assert.ok(!printableHtml.includes(art7Old), 'Nepřeložený upravený článek nesmí převzít zastaralý text 2024');
-
-  // Stažení HTML verze
-  document.getElementById('downloadPdfHtmlBtn').click();
-  const htmlDownload = window.__downloads.pop();
-  assert.strictEqual(htmlDownload.name, 'Eticky_Kodex_2026_CS_2024.html');
-});
-
-// TEST 13: Excel export - tlačítka v Kroku 4 vytvoří skutečné sešity se správným obsahem
-runTest('Excel Export: Tlačítka v Kroku 4 vygenerují kompletní a čistý sešit s upravenými texty a stavem ověření', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
-  const XLSX = window.XLSX;
-
   openCzechStudio(window);
   const card4 = document.getElementById('article-card-3');
-  typeInto(window, card4.querySelector('textarea.target-textarea'), 'Dary do 50 EUR – nový text.');
-  const cb4 = card4.querySelector('.verify-checkbox');
-  cb4.checked = true;
-  cb4.dispatchEvent(new window.Event('change'));
-  // Článek 8 (nový) má jen rozpracovaný koncept
-  typeInto(window, document.getElementById('article-card-7').querySelector('textarea.target-textarea'), 'Koncept AI článku');
+  const textarea = card4.querySelector('textarea.target-textarea');
+  const liveDiff = card4.querySelector('.live-target-diff');
 
+  typeInto(window, textarea, 'Dary a pozvání lze přijmout pouze tehdy, pokud jejich hodnota nepřesahuje 50 eur a byly předem schváleny přes portál compliance.');
+  assert.ok(liveDiff.innerHTML.includes('<ins class="diff-ins"') && liveDiff.innerHTML.includes('50'));
+  assert.ok(liveDiff.innerHTML.includes('<del class="diff-del"') && liveDiff.innerHTML.includes('35'));
+  assert.strictEqual(window.__app.state.translations['CS 2024'][3].status, 'draft');
+
+  card4.querySelector('.prefill-old-btn').click();
+  assert.ok(textarea.value.includes('35 eur'));
+
+  const card8 = document.getElementById('article-card-7');
+  card8.querySelector('.prefill-ref-btn').click();
+  assert.ok(card8.querySelector('textarea').value.includes('Künstlicher Intelligenz'));
+});
+
+runTest('Copilot prompt: obecný text, číslo řádku, reference i stará verze jazyka', () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  document.getElementById('article-card-3').querySelector('.copy-prompt-btn').click();
+
+  const prompt = window.getLastCopiedText();
+  ['Odstavec: #5', 'CS', '35 Euro', '50 Euro', '35 eur', 'POUZE minimální nutné změny', 'POUZE vraťte výsledný text']
+    .forEach(part => assert.ok(prompt.includes(part), 'Chybí: ' + part));
+  assert.ok(!/etick|kodex|němč/i.test(prompt.split('=== 1.')[0]), 'Instrukce nejsou vázané na druh dokumentu');
+  assert.ok(prompt.length < 1600, `Prompt je stručný (${prompt.length} znaků)`);
+  assert.ok(document.querySelector('#toastContainer .toast'));
+});
+
+runTest('Vlastní šablona promptu se použije a uloží', async () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  document.getElementById('settingsPromptBtn').click();
+  const input = document.getElementById('promptTemplateInput');
+  assert.ok(input.value.includes('{TARGET_LANG}') && !/etick|němč/i.test(input.value), 'Výchozí šablona je obecná');
+  input.value = 'AI: {TARGET_LANG} | {ROW_ID} | {REF_LANG} | {REF_NEW}';
+  document.getElementById('savePromptTemplateBtn').click();
+
+  document.getElementById('article-card-3').querySelector('.copy-prompt-btn').click();
+  const prompt = window.getLastCopiedText();
+  assert.ok(prompt.startsWith('AI: CS | #5 | DE 2026 (Referenz) | '), prompt.slice(0, 60));
+  assert.ok(prompt.includes('50 Euro'));
+});
+
+runTest('Schvalování: třídy karty a progress bar', () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  const card4 = document.getElementById('article-card-3');
+  const bar = document.getElementById('currentLangProgressBar');
+  const before = bar.style.width;
+  const cb = card4.querySelector('.verify-checkbox');
+  cb.checked = true;
+  cb.dispatchEvent(new window.Event('change'));
+  assert.ok(card4.classList.contains('status-verified') && !card4.classList.contains('status-pending'));
+  assert.notStrictEqual(bar.style.width, before);
+  assert.ok(document.getElementById('currentLangProgressText').textContent.includes('hotovo'));
+});
+
+// Uložení / načtení projektu tlačítky v záhlaví
+runTest('Projekt: tlačítka v záhlaví (i v Kroku 3) uloží a načtou kompletní stav', async () => {
+  const env1 = createDomEnvironment();
+  const d1 = env1.document;
+  d1.getElementById('loadSampleBtn').click();
+  const label = langRow(d1, 'CS 2024').querySelector('.lang-label-input');
+  label.value = 'Čeština';
+  label.dispatchEvent(new env1.window.Event('input'));
+  d1.getElementById('confirmMappingBtn').click();
+  d1.getElementById('goToTranslationBtn').click();
+  Array.from(d1.querySelectorAll('#langTabsWrapper .lang-tab')).find(t => t.textContent.includes('Čeština')).click();
+
+  const card4 = d1.getElementById('article-card-3');
+  typeInto(env1.window, card4.querySelector('textarea.target-textarea'), 'MŮJ TEXT ČLÁNKU 4');
+  const cb = card4.querySelector('.verify-checkbox');
+  cb.checked = true;
+  cb.dispatchEvent(new env1.window.Event('change'));
+  env1.window.__app.state.pdfTemplate = { docTitle: 'Můj dokument' };
+
+  // Uložení z Kroku 3 tlačítkem v záhlaví
+  assert.strictEqual(d1.getElementById('step3Section').style.display, 'block');
+  d1.getElementById('saveProjectBtn').click();
+  const download = env1.window.__downloads.pop();
+  assert.ok(download && /_projekt_\d{4}-\d{2}-\d{2}\.json$/.test(download.name), 'Stáhne se soubor projektu');
+  assert.ok(toastTexts(d1).some(t => t.includes(download.name)), 'Toast uvádí název souboru');
+  const json = await readBlobText(env1.window, download.blob);
+
+  // Načtení tlačítkem v záhlaví: otevře výběr souboru
+  const env2 = createDomEnvironment();
+  let pickerOpened = false;
+  env2.document.getElementById('projectFileInput').click = () => { pickerOpened = true; };
+  env2.document.getElementById('loadProjectBtn').click();
+  assert.ok(pickerOpened, 'Tlačítko Načíst projekt otevře výběr souboru');
+  env2.window.__app.loadProjectFile(new env2.window.File([json], download.name, { type: 'application/json' }));
+  await sleep(50);
+
+  assert.strictEqual(env2.window.__lastAlert, undefined, String(env2.window.__lastAlert));
+  assert.strictEqual(env2.document.getElementById('step3Section').style.display, 'block');
+  const active = env2.document.querySelector('#langTabsWrapper .lang-tab.active');
+  assert.ok(active.textContent.includes('Čeština'), 'Název jazyka i aktivní jazyk jsou obnoveny');
+  const restored = env2.document.getElementById('article-card-3');
+  assert.strictEqual(restored.querySelector('textarea').value, 'MŮJ TEXT ČLÁNKU 4');
+  assert.strictEqual(restored.querySelector('.verify-checkbox').checked, true);
+  assert.deepStrictEqual(plain(env2.window.__app.state.pdfTemplate), { docTitle: 'Můj dokument' });
+});
+
+// Dokument pro tisk
+runTest('Dokument pro tisk: vybraný jazyk, upravený text, koncept, žádné nadpisy', async () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Finální text odstavce 4.');
   document.getElementById('goToExportBtn').click();
 
-  // Komplexní sešit
+  const select = document.getElementById('pdfLangSelect');
+  const options = Array.from(select.options).map(o => o.textContent);
+  assert.strictEqual(options[0], 'DE 2026 (Referenz) (reference – nová verze)');
+  assert.ok(options.includes('CS'));
+  assert.strictEqual(select.value, 'CS 2024', 'Předvybrán aktivní jazyk');
+
+  document.getElementById('printPdfBtn').click();
+  const win = window.__printWindows.pop();
+  await sleep(350);
+  assert.ok(win && win.printed);
+  const html = win.html;
+  assert.ok(html.includes('Finální text odstavce 4.'));
+  assert.ok(html.includes('KONCEPT'));
+  assert.ok(!html.includes(window.__app.state.rows[6]['CS 2024']), 'Zastaralý text se nepoužije');
+  assert.ok(!html.includes('Art. 0') && !html.includes('Telefax'), 'Bez nadpisů ze sloupců a bez zrušených odstavců');
+  assert.ok(html.includes('<div class="doc-title">ukazkovy_dokument</div>'));
+
+  document.getElementById('downloadPdfHtmlBtn').click();
+  assert.strictEqual(window.__downloads.pop().name, 'ukazkovy_dokument_CS.html');
+});
+
+// Excel exporty
+runTest('Excel: kompletní a nová verze tlačítky v Kroku 4', () => {
+  const { window, document } = createDomEnvironment();
+  const XLSX = window.XLSX;
+  openCzechStudio(window);
+  const card4 = document.getElementById('article-card-3');
+  typeInto(window, card4.querySelector('textarea.target-textarea'), 'Dary do 50 EUR.');
+  const cb = card4.querySelector('.verify-checkbox');
+  cb.checked = true;
+  cb.dispatchEvent(new window.Event('change'));
+  document.getElementById('goToExportBtn').click();
+
   document.getElementById('downloadComprehensiveBtn').click();
   const comp = window.__workbooks.pop();
-  assert.strictEqual(comp.name, 'vzorec_eticky_kodex_2024_2026_2024_2026_Srovnani.xlsx');
-  assert.deepStrictEqual(plain(comp.wb.SheetNames), ['Srovnani_2024_2026_Komplet', 'Stav_prekladu']);
-  const compRows = XLSX.utils.sheet_to_json(comp.wb.Sheets.Srovnani_2024_2026_Komplet, { defval: '' });
-  assert.strictEqual(compRows.length, 15, 'Komplexní export zachovává všech 15 řádků');
-  assert.strictEqual(compRows[3]['CS 2024'], window.__app.state.rows[3]['CS 2024'], 'Původní sloupec zůstal');
-  assert.strictEqual(compRows[3]['CS 2026'], 'Dary do 50 EUR – nový text.', 'Nový sloupec obsahuje upravený text');
-  assert.strictEqual(compRows[0]['CS 2026'], window.__app.state.rows[0]['CS 2024'], 'Nezměněný článek je převzat');
-  assert.strictEqual(compRows[0]['FR 2026'], window.__app.state.rows[0]['FR 2024'], 'I neotevřený jazyk má převzaté nezměněné články');
-  const statusRows = XLSX.utils.sheet_to_json(comp.wb.Sheets.Stav_prekladu, { defval: '' });
-  assert.strictEqual(statusRows[3]['CS 2026'], 'Ověřeno');
-  assert.strictEqual(statusRows[7]['CS 2026'], 'Čeká na kontrolu');
-  assert.strictEqual(statusRows[2]['CS 2026'], 'Chybí překlad');
-  assert.ok(toastTexts(document).some(t => /Pozor: \d+ odstavců/.test(t)), 'Uživatel je upozorněn na neověřené odstavce');
+  assert.strictEqual(comp.name, 'ukazkovy_dokument_srovnani.xlsx');
+  assert.deepStrictEqual(plain(comp.wb.SheetNames), ['Srovnani', 'Stav_prekladu']);
+  const header = XLSX.utils.sheet_to_json(comp.wb.Sheets.Srovnani, { header: 1 })[0];
+  assert.strictEqual(header.indexOf('CS 2026'), header.indexOf('CS 2024') + 1, 'Nová verze hned za starou');
+  const rows = XLSX.utils.sheet_to_json(comp.wb.Sheets.Srovnani, { defval: '' });
+  assert.strictEqual(rows[3]['CS 2026'], 'Dary do 50 EUR.');
+  assert.strictEqual(rows[3]['CS 2024'], window.__app.state.rows[3]['CS 2024'], 'Stará verze zůstává');
+  const status = XLSX.utils.sheet_to_json(comp.wb.Sheets.Stav_prekladu, { defval: '' });
+  assert.strictEqual(status[3]['Řádek'], 5);
+  assert.strictEqual(status[3].CS, 'Ověřeno');
+  assert.ok(toastTexts(document).some(t => /Pozor: \d+ odstavců/.test(t)));
 
-  // Čistý sešit 2026
   document.getElementById('downloadCleanBtn').click();
   const clean = window.__workbooks.pop();
-  assert.strictEqual(clean.name, 'vzorec_eticky_kodex_2024_2026_2026_Final.xlsx');
-  const cleanHeader = XLSX.utils.sheet_to_json(clean.wb.Sheets[clean.wb.SheetNames[0]], { header: 1 })[0];
-  assert.ok(cleanHeader.includes('DE 2026 (Referenz)'), 'Název referenčního sloupce 2026 se nezdvojuje');
-  assert.ok(!cleanHeader.includes('DE 2024 (Referenz)') && !cleanHeader.includes('CS 2024'), 'Bez sloupců 2024');
+  assert.strictEqual(clean.name, 'ukazkovy_dokument_nova_verze.xlsx');
   const cleanRows = XLSX.utils.sheet_to_json(clean.wb.Sheets[clean.wb.SheetNames[0]], { defval: '' });
-  assert.strictEqual(cleanRows.length, 13, 'Čistý export 2026 odfiltroval 2 smazané odstavce (13 řádků)');
-  assert.ok(cleanRows.some(r => r['CS 2026'] === 'Dary do 50 EUR – nový text.'), 'Upravený text je v čisté verzi');
-  assert.ok(!cleanRows.some(r => r['Artikel-Nr.'] === 'Art. 10'), 'Zrušený článek 10 chybí');
+  assert.strictEqual(cleanRows.length, 13);
+  assert.ok(!('CS 2024' in cleanRows[0]) && cleanRows.some(r => r['CS 2026'] === 'Dary do 50 EUR.'));
 });
 
-// TEST 14: Krok 1 - Interaktivní náhled dat Excelu (Data Preview Table)
-runTest('Data Preview Table: Po načtení souboru se v Kroku 1 vykreslí tabulka s reálnými daty', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
+runTest('Excel: částečný sešit pro vybraný jazyk s volitelnými referenčními sloupci', () => {
+  const { window, document } = createDomEnvironment();
+  const XLSX = window.XLSX;
+  openCzechStudio(window);
+  typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Nový text 4.');
+  document.getElementById('goToExportBtn').click();
 
-  const previewContainer = document.getElementById('dataPreviewContainer');
-  const previewHead = document.getElementById('previewTableHead');
-  const previewBody = document.getElementById('previewTableBody');
+  const context = document.getElementById('partialContextContainer');
+  const boxes = Array.from(context.querySelectorAll('input[type="checkbox"]'));
+  assert.deepStrictEqual(boxes.filter(b => b.checked).map(b => b.value), ['DE 2024 (Referenz)', 'DE 2026 (Referenz)'], 'Výchozí kontext = reference');
+  assert.ok(!boxes.some(b => b.value === 'CS 2024'), 'Vlastní sloupec jazyka není mezi kontextem');
 
-  // Před načtením je container skrytý
-  assert.strictEqual(previewContainer.style.display, 'none');
+  // Uživatel přidá angličtinu a odebere starou referenci
+  const en = boxes.find(b => b.value === 'EN 2024');
+  en.checked = true;
+  en.dispatchEvent(new window.Event('change'));
+  const refOld = boxes.find(b => b.value === 'DE 2024 (Referenz)');
+  refOld.checked = false;
+  refOld.dispatchEvent(new window.Event('change'));
 
-  // Načtení sample dat
-  document.getElementById('loadSampleBtn').click();
+  document.getElementById('downloadPartialBtn').click();
+  const out = window.__workbooks.pop();
+  assert.strictEqual(out.name, 'ukazkovy_dokument_CS.xlsx');
+  const sheet = out.wb.Sheets[out.wb.SheetNames[0]];
+  assert.deepStrictEqual(plain(XLSX.utils.sheet_to_json(sheet, { header: 1 })[0]), ['Řádek', 'DE 2026 (Referenz)', 'EN 2024', 'CS 2024', 'CS 2026', 'Stav']);
+  const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  assert.strictEqual(data.length, 15);
+  assert.strictEqual(data[3]['Řádek'], 5);
+  assert.strictEqual(data[3]['CS 2026'], 'Nový text 4.');
+  assert.strictEqual(data[3].Stav, 'Čeká na kontrolu');
 
-  // Po načtení je container zobrazen a tabulka naplněna
-  assert.strictEqual(previewContainer.style.display, 'block', 'Data preview container je zobrazen');
-  assert.ok(previewHead.innerHTML.includes('Artikel-Nr.'), 'Hlavička obsahuje Artikel-Nr.');
-  assert.ok(previewHead.innerHTML.includes('DE 2024 (Referenz)'), 'Hlavička obsahuje DE 2024');
-  assert.ok(previewHead.innerHTML.includes('CS 2024'), 'Hlavička obsahuje CS 2024');
-
-  // Ověření řádků
-  const trs = previewBody.querySelectorAll('tr');
-  assert.strictEqual(trs.length, 4, 'Náhled zobrazuje první 4 řádky dat');
-  assert.ok(previewBody.innerHTML.includes('Art. 01'), 'Tělo náhledu obsahuje Art. 01');
+  // Jiný jazyk ve výběru → kontext se přepočítá
+  const select = document.getElementById('pdfLangSelect');
+  select.value = 'FR 2024';
+  select.dispatchEvent(new window.Event('change'));
+  assert.ok(Array.from(context.querySelectorAll('input')).some(b => b.value === 'CS 2024'));
 });
 
-// TEST 15: Cross-Language Progress Matrix a globální schválení beze změny
-runTest('Cross-Language Matrix & Bulk Approval: Matice pokroku a hromadné schválení nezměněných', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
-
+// Náhled dat
+runTest('Náhled dat: čísla řádků a sloupce v pořadí souboru', () => {
+  const { document } = createDomEnvironment();
+  const container = document.getElementById('dataPreviewContainer');
+  assert.strictEqual(container.style.display, 'none');
   document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  const matrixCard = document.getElementById('crossLangMatrixCard');
-  assert.strictEqual(matrixCard.style.display, 'block', 'Karta matice jazyků je zobrazena');
-
-  const matrixGrid = document.getElementById('crossLangMatrixGrid');
-  const pills = matrixGrid.querySelectorAll('.matrix-pill');
-  assert.ok(pills.length >= 10, 'Matice obsahuje pill pro každý cílový jazyk');
-
-  // Aktivní pill odpovídá aktivnímu jazyku
-  const activePill = matrixGrid.querySelector('.matrix-pill.active');
-  assert.ok(activePill, 'Existuje aktivní pill');
-
-  // Nezměněné články jsou schváleny automaticky; uživatel jedno schválení v CS a jedno v EN zruší
-  const csStubs = window.__app.state.translations['CS 2024'];
-  const enStubs = window.__app.state.translations['EN 2024'];
-  csStubs[0].isVerified = false;
-  enStubs[1].isVerified = false;
-
-  // Kliknutí na globální schválení nezměněných
-  const globalApproveBtn = document.getElementById('approveAllUnchangedGlobalBtn');
-  globalApproveBtn.click();
-
-  // Ověření, že pro CS 2024 i ostatní jazyky došlo ke schválení nezměněných
-  const unchangedCs = csStubs.filter(s => s.classification === 'UNCHANGED');
-  assert.ok(unchangedCs.every(s => s.isVerified === true), 'Všechny nezměněné články v češtině jsou schváleny');
-  assert.strictEqual(enStubs[1].isVerified, true, 'Schválení proběhlo i v jiném jazyce');
-  assert.ok(toastTexts(document).some(t => t.includes('Schváleno 2 nezměněných')), 'Toast hlásí přesný počet (a ne surový klíč překladu)');
-
-  // Aktualizace matice zobrazí nový počet schválených
-  const csPill = Array.from(matrixGrid.querySelectorAll('.matrix-pill')).find(p => p.textContent.includes('CS 2024'));
-  assert.ok(csPill && csPill.textContent.includes('7/15'), 'Pill pro CS 2024 zobrazuje 7 schválených z 15');
+  assert.strictEqual(container.style.display, 'block');
+  const head = Array.from(document.querySelectorAll('#previewTableHead th')).map(th => th.textContent);
+  assert.deepStrictEqual(head.slice(0, 3), ['Řádek', 'Artikel-Nr.', 'Bereich']);
+  const firstRow = document.querySelectorAll('#previewTableBody tr')[0].querySelectorAll('td');
+  assert.strictEqual(firstRow[0].textContent, '2');
+  assert.strictEqual(document.querySelectorAll('#previewTableBody tr').length, 4);
 });
 
-// TEST 16: Schválení nezměněných v aktivním jazyce a klávesová zkratka Ctrl+Enter (CAT)
-runTest('CAT Shortcut & Active Language Bulk Approve: Klávesová zkratka Ctrl+Enter a hromadné schválení', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
+runTest('Matice jazyků a hromadné schválení nezměněných', () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  const grid = document.getElementById('crossLangMatrixGrid');
+  assert.strictEqual(grid.querySelectorAll('.matrix-pill').length, 10);
 
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
+  const cs = window.__app.state.translations['CS 2024'];
+  const en = window.__app.state.translations['EN 2024'];
+  cs[0].isVerified = false;
+  en[1].isVerified = false;
+  document.getElementById('approveAllUnchangedGlobalBtn').click();
+  assert.ok(cs.filter(s => s.classification === 'UNCHANGED').every(s => s.isVerified));
+  assert.strictEqual(en[1].isVerified, true);
+  assert.ok(toastTexts(document).some(t => t.includes('Schváleno 2 nezměněných')));
+  const csPill = Array.from(grid.querySelectorAll('.matrix-pill')).find(p => p.querySelector('.matrix-pill-lang').textContent === 'CS');
+  assert.ok(csPill.textContent.includes('7/15'));
+});
 
-  // Přepnutí na češtinu (CS 2024)
-  const csTab = Array.from(document.querySelectorAll('.lang-tab')).find(t => t.textContent.includes('CS 2024'));
-  if (csTab) csTab.click();
-
-  // Test tlačítka Schválit nezměněné v aktivním jazyce
-  const approveActiveBtn = document.getElementById('approveUnchangedBtn');
-  approveActiveBtn.click();
-
-  const csStubs = window.__app.state.translations['CS 2024'];
-  assert.strictEqual(csStubs[0].isVerified, true, 'Článek 1 (nezměněný) je ověřen');
-
-  // Test CAT zkratky Ctrl + Enter na článku 4 (který je MODIFIED a dosud neověřen)
-  assert.strictEqual(csStubs[3].isVerified, false, 'Článek 4 byl předtím neověřen');
+runTest('Ctrl+Enter schválí odstavec', () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  const cs = window.__app.state.translations['CS 2024'];
   const card4 = document.getElementById('article-card-3');
-  const textarea4 = card4.querySelector('.target-textarea');
-  textarea4.value = 'Upravený text článku 4 potvrzený klávesou Ctrl+Enter.';
-  textarea4.dispatchEvent(new window.Event('input'));
-
-  // Simulace klávesové zkratky Ctrl + Enter
-  const ctrlEnterEvent = new window.KeyboardEvent('keydown', {
-    key: 'Enter',
-    ctrlKey: true,
-    bubbles: true,
-    cancelable: true
-  });
-  textarea4.dispatchEvent(ctrlEnterEvent);
-
-  // Ověření, že článek 4 byl okamžitě označen jako ověřený
-  assert.strictEqual(csStubs[3].isVerified, true, 'Článek 4 je nyní ověřen díky Ctrl+Enter');
-  assert.strictEqual(card4.classList.contains('status-verified'), true, 'Karta má třídu status-verified');
-  const cb4 = card4.querySelector('.verify-checkbox');
-  assert.strictEqual(cb4.checked, true, 'Checkbox je zaškrtnut');
+  const ta = card4.querySelector('.target-textarea');
+  typeInto(window, ta, 'Text potvrzený klávesou.');
+  assert.strictEqual(cs[3].isVerified, false);
+  ta.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true }));
+  assert.strictEqual(cs[3].isVerified, true);
+  assert.ok(card4.classList.contains('status-verified') && card4.querySelector('.verify-checkbox').checked);
 });
 
-// TEST 17: Dávkový prompt pro Copilot a Smart Multi-Paste v DOM
-runTest('Batch Copilot Prompt & Smart Multi-Paste: Hromadné prompty a vkládání přeložených dávek v GUI', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-
-  // Přepnutí na češtinu (CS 2024)
-  const csTab = Array.from(document.querySelectorAll('.lang-tab')).find(t => t.textContent.includes('CS 2024'));
-  if (csTab) csTab.click();
-
-  // 1. Otevření modálního okna dávkového promptu
-  const batchPromptBtn = document.getElementById('batchPromptBtn');
-  batchPromptBtn.click();
-
-  const batchPromptModal = document.getElementById('batchPromptModal');
-  assert.strictEqual(batchPromptModal.classList.contains('open'), true, 'Modální okno dávkového promptu je otevřeno');
-
-  const batchTextarea = document.getElementById('batchPromptTextarea');
-  assert.ok(batchTextarea.value.includes('DÁVKOVÝ PŘEKLAD'), 'Textarea obsahuje dávkový prompt');
-  assert.ok(batchTextarea.value.includes('Art. 04'), 'Obsahuje článek 4');
-  assert.ok(batchTextarea.value.includes('Art. 08'), 'Obsahuje článek 8');
-
-  // Zavření okna
-  document.getElementById('closeBatchPromptBtn').click();
-  assert.strictEqual(batchPromptModal.classList.contains('open'), false, 'Modální okno se zavřelo');
-
-  // 2. Otevření Smart Multi-Paste okna
-  const smartPasteBtn = document.getElementById('smartPasteBtn');
-  smartPasteBtn.click();
-
-  const smartPasteModal = document.getElementById('smartPasteModal');
-  assert.strictEqual(smartPasteModal.classList.contains('open'), true, 'Smart Paste modální okno je otevřeno');
-
-  // Vložení odpovědi z LLM
-  const pasteInput = document.getElementById('smartPasteInput');
-  pasteInput.value = `
-[Art. 04]
-Dary a pohostinnost: Přijímání darů je nově omezeno částkou 50 EUR ročně.
-
-[Art. 06]
-Ochrana údajů: Všechny systémy podléhají směrnici AI 2026.
-
-[Art. 99]
-Text článku, který v kodexu neexistuje.
-  `;
-  const art1Before = window.__app.state.translations['CS 2024'][0].targetNew;
-
-  // Kliknutí na analyzovat (Parse)
-  const parseBtn = document.getElementById('smartPasteParseBtn');
-  parseBtn.click();
-
-  // Ověření zobrazení rozpoznaných odstavců
-  const matchesContainer = document.getElementById('smartPasteMatchesContainer');
-  assert.strictEqual(matchesContainer.style.display, 'block', 'Kontejner rozpoznaných položek je zobrazen');
-
-  const badges = matchesContainer.querySelectorAll('.matched-article-badge');
-  assert.strictEqual(badges.length, 2, 'Byly rozpoznány přesně 2 odstavce');
-  assert.ok(badges[0].textContent.includes('Art. 04'), 'První odznak je Art. 04');
-  assert.ok(badges[1].textContent.includes('Art. 06'), 'Druhý odznak je Art. 06');
-  const unmatchedInfo = matchesContainer.querySelector('.smart-paste-unmatched');
-  assert.ok(unmatchedInfo && unmatchedInfo.textContent.includes('Art. 99'), 'Nespárovaná značka je uživateli ukázána');
-
-  // Aplikace do studia
-  const applyBtn = document.getElementById('smartPasteApplyBtn');
-  assert.strictEqual(applyBtn.disabled, false, 'Tlačítko aplikovat je aktivní');
-  applyBtn.click();
-
-  // Ověření, že texty byly zapsány do DOM a stavu
-  const csStubs = window.__app.state.translations['CS 2024'];
-  assert.ok(csStubs[3].targetNew.includes('50 EUR ročně'), 'Článek 4 má nový text z Smart Paste');
-  assert.ok(csStubs[5].targetNew.includes('směrnici AI 2026'), 'Článek 6 má nový text z Smart Paste');
-  assert.strictEqual(csStubs[3].isVerified, true, 'Článek 4 byl automaticky ověřen');
-  assert.strictEqual(csStubs[0].targetNew, art1Before, 'Nespárovaný text nepřepsal žádný jiný článek');
-  assert.ok(!csStubs.some(s => s.targetNew.includes('neexistuje')), 'Text neexistujícího článku nebyl nikam vložen');
-  assert.strictEqual(document.getElementById('article-card-3').querySelector('textarea').value, csStubs[3].targetNew, 'Karta v DOM ukazuje vložený text');
-  assert.ok(toastTexts(document).some(t => t.includes('Vloženo 2 přeložených článků')), 'Toast hlásí počet vložených článků');
-});
-
-// TEST 18: Manažerský souhrn změn (Markdown, Word .doc, PDF) v GUI
-runTest('Managerial Change Summary: Export souhrnu změn v Markdown, Wordu a PDF z Kroku 2 a 4', async () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-
-  // Ověření existence tlačítek v Kroku 2
-  const step2MdBtn = document.getElementById('step2ExportMdBtn');
-  const step2DocBtn = document.getElementById('step2ExportDocBtn');
-  const step2PdfBtn = document.getElementById('step2ExportPdfBtn');
-
-  assert.ok(step2MdBtn && step2DocBtn && step2PdfBtn, 'Tlačítka pro manažerský export v Kroku 2 existují');
-
-  // Skutečné stažení z Kroku 2
-  step2MdBtn.click();
-  const md = window.__downloads.pop();
-  assert.strictEqual(md.name, 'Eticky_Kodex_Manazerske_Shrnuti_Zmen_2024_2026.md');
-  const mdText = await readBlobText(window, md.blob);
-  assert.ok(mdText.includes('| **Celkem hodnocených odstavců** | 15 | 100% |'), 'Markdown obsahuje tabulku KPI');
-  assert.ok(mdText.includes('Art. 08'), 'Markdown obsahuje nově přidaný článek');
-
-  step2DocBtn.click();
-  const doc = window.__downloads.pop();
-  assert.ok(doc.name.endsWith('.doc'));
-  const docText = await readBlobText(window, doc.blob);
-  assert.ok(docText.includes('urn:schemas-microsoft-com:office:word') && docText.includes('Art. 04'), 'Word dokument obsahuje data');
-
-  step2PdfBtn.click();
-  const mgrPrint = window.__printWindows.pop();
-  assert.ok(mgrPrint && mgrPrint.html.includes('Manažerské shrnutí změn'), 'Tiskové okno obsahuje report');
-
-  const toasts = toastTexts(document);
-  assert.ok(toasts.some(t => t.includes('Markdown')) && toasts.some(t => t.includes('Word')), 'Toasty mají lidský text');
-  assert.ok(!toasts.some(t => /mgrExport/.test(t)), 'Žádný surový klíč překladu');
-
-  // Přechod do Kroku 4
-  document.getElementById('goToTranslationBtn').click();
-  document.getElementById('goToExportBtn').click();
-
-  // Ověření existence tlačítek v Kroku 4
-  const step4MdBtn = document.getElementById('downloadMgrMdBtn');
-  const step4DocBtn = document.getElementById('downloadMgrDocBtn');
-  const step4PdfBtn = document.getElementById('printMgrPdfBtn');
-
-  assert.ok(step4MdBtn && step4DocBtn && step4PdfBtn, 'Tlačítka pro manažerský export v Kroku 4 existují');
-
-  // Ověření generování obsahu manažerského souhrnu
-  const summary = window.ComparatorEngine.generateManagerialChangeSummary({
-    rows: window.__app.state.rows,
-    headers: window.__app.state.headers,
-    mappings: window.__app.state.mappings,
-    companyName: 'Corporate Compliance AG',
-    uiLang: 'cs'
-  });
-
-  assert.ok(summary.markdown.includes('Manažerské shrnutí změn'), 'Obsahuje markdown nadpis');
-  assert.ok(summary.htmlDoc.includes('xmlns:w="urn:schemas-microsoft-com:office:word"'), 'Word dokument má Word namespace');
-  assert.strictEqual(summary.stats.totalRows, 15);
-});
-
-// TEST 19: Uživatelská úprava PDF šablony v GUI
-runTest('PDF Template Customization Modal: Úprava šablony, barev a podpisů v GUI', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
-
-  document.getElementById('loadSampleBtn').click();
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-  document.getElementById('goToExportBtn').click();
-
-  // Otevření okna šablony
-  const editTplBtn = document.getElementById('editPdfTemplateBtn');
-  editTplBtn.click();
-
-  const tplModal = document.getElementById('pdfTemplateModal');
-  assert.strictEqual(tplModal.classList.contains('open'), true, 'Modální okno šablony PDF je otevřeno');
-
-  // Úprava hodnot v GUI
-  const compInput = document.getElementById('tplCompanyName');
-  compInput.value = 'Holding Bohemia a.s.';
-
-  const titleInput = document.getElementById('tplDocTitle');
-  titleInput.value = 'FIREMNÍ ETICKÝ KODEX 2026';
-
-  const accentInput = document.getElementById('tplAccentColor');
-  accentInput.value = '#7c3aed';
-
-  const dept1Input = document.getElementById('tplSignDept1');
-  dept1Input.value = 'Oddělení udržitelnosti a ESG';
-
-  // Uložení šablony
-  document.getElementById('savePdfTemplateBtn').click();
-  assert.strictEqual(tplModal.classList.contains('open'), false, 'Modální okno se zavřelo');
-
-  // Ověření, že stav obsahuje novou šablonu
-  const savedTpl = window.__app.state.pdfTemplate;
-  assert.ok(savedTpl, 'Šablona je uložena ve stavu');
-  assert.strictEqual(savedTpl.companyName, 'Holding Bohemia a.s.');
-  assert.strictEqual(savedTpl.docTitle, 'FIREMNÍ ETICKÝ KODEX 2026');
-  assert.strictEqual(savedTpl.accentColor, '#7c3aed');
-  assert.strictEqual(savedTpl.signDept1, 'Oddělení udržitelnosti a ESG');
-
-  // Ověření, že generovaný PDF dokument novou šablonu plně respektuje
-  const docHtml = window.PdfExporter.generateDocumentHtml({
-    rows: window.__app.state.rows,
-    headers: window.__app.state.headers,
-    mappings: window.__app.state.mappings,
-    translations: window.__app.state.translations,
-    targetCol: 'CS 2024',
-    template: savedTpl,
-    uiLang: 'cs'
-  });
-
-  assert.ok(docHtml.includes('Holding Bohemia a.s.'), 'Dokument obsahuje upravený název firmy');
-  assert.ok(docHtml.includes('FIREMNÍ ETICKÝ KODEX 2026'), 'Dokument obsahuje upravený název kodexu');
-  assert.ok(docHtml.includes('#7c3aed'), 'Dokument obsahuje upravenou accent barvu');
-  assert.ok(docHtml.includes('Oddělení udržitelnosti a ESG'), 'Dokument obsahuje upravený podpisový blok');
-});
-
-// TEST 20: Automatické ukládání do LocalStorage a obnovení po znovuotevření aplikace
-runTest('Auto-Save & Resume: Úpravy se uloží do prohlížeče a po znovuotevření se obnoví', async () => {
-  const env1 = createDomEnvironment();
-  const saveText = env1.document.getElementById('saveStatusText');
-  assert.ok(saveText.textContent.includes('uloženo'), 'Výchozí stav je uloženo');
-
-  openCzechStudio(env1.window);
-  const card4 = env1.document.getElementById('article-card-3');
-  typeInto(env1.window, card4.querySelector('textarea.target-textarea'), 'Automaticky uložený text čl. 4');
-  assert.strictEqual(saveText.textContent, 'Ukládám...', 'Během čekání na uložení indikátor ukazuje ukládání');
-
-  // Zavření stránky uloží rozpracovanou změnu okamžitě (bez čekání na debounce)
-  env1.window.dispatchEvent(new env1.window.Event('pagehide'));
-  assert.strictEqual(saveText.textContent, 'Vše uloženo');
-  const stored = env1.window.localStorage.getItem('ethic_comparator_workspace_v1');
-  assert.ok(stored && stored.includes('Automaticky uložený text čl. 4'), 'LocalStorage obsahuje poslední úpravu');
-
-  // Nové otevření aplikace se stejným úložištěm a potvrzením obnovy
-  const env2 = createDomEnvironment({
-    acceptResume: true,
-    beforeInit: (w) => w.localStorage.setItem('ethic_comparator_workspace_v1', stored)
-  });
-  await sleep(150);
-  assert.ok(/rozpracovaný projekt/.test(env2.window.__lastConfirm), 'Uživatel je dotázán na obnovení');
-  assert.strictEqual(env2.document.getElementById('step3Section').style.display, 'block', 'Obnoví se Krok 3');
-  const restored = env2.document.getElementById('article-card-3').querySelector('textarea.target-textarea');
-  assert.strictEqual(restored.value, 'Automaticky uložený text čl. 4');
-});
-
-runTest('Auto-Save Failure: Selhání ukládání (plné úložiště) je viditelně oznámeno', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
+runTest('Hromadný prompt a Smart Paste se značkami řádků', () => {
+  const { window, document } = createDomEnvironment();
   openCzechStudio(window);
 
-  const storageProto = Object.getPrototypeOf(window.localStorage);
-  const originalSetItem = storageProto.setItem;
-  storageProto.setItem = function (key, value) {
-    if (key === 'ethic_comparator_workspace_v1') {
-      const err = new Error('QuotaExceededError');
-      err.name = 'QuotaExceededError';
-      throw err;
-    }
-    return originalSetItem.call(this, key, value);
-  };
+  document.getElementById('batchPromptBtn').click();
+  const prompt = document.getElementById('batchPromptTextarea').value;
+  assert.ok(prompt.includes('HROMADNÁ AKTUALIZACE PŘEKLADU'));
+  assert.ok(prompt.includes('[#5]') && prompt.includes('[#9]'), 'Značky odpovídají číslům řádků');
+  document.getElementById('closeBatchPromptBtn').click();
+
+  document.getElementById('smartPasteBtn').click();
+  const before = window.__app.state.translations['CS 2024'][0].targetNew;
+  document.getElementById('smartPasteInput').value = '[#5]\nDary jsou omezeny na 50 EUR ročně.\n\n[#7]\nOchrana údajů podle AI 2026.\n\n[#99]\nNeexistující odstavec.';
+  document.getElementById('smartPasteParseBtn').click();
+  const container = document.getElementById('smartPasteMatchesContainer');
+  const badges = Array.from(container.querySelectorAll('.matched-article-badge')).map(b => b.textContent);
+  assert.strictEqual(badges.length, 2);
+  assert.ok(badges[0].includes('#5') && badges[1].includes('#7'));
+  assert.ok(container.querySelector('.smart-paste-unmatched').textContent.includes('#99'));
+
+  document.getElementById('smartPasteApplyBtn').click();
+  const cs = window.__app.state.translations['CS 2024'];
+  assert.ok(cs[3].targetNew.includes('50 EUR ročně') && cs[3].isVerified);
+  assert.ok(cs[5].targetNew.includes('AI 2026'));
+  assert.strictEqual(cs[0].targetNew, before);
+  assert.ok(!cs.some(s => s.targetNew.includes('Neexistující')));
+  assert.ok(toastTexts(document).some(t => t.includes('Vloženo 2 odstavců')));
+});
+
+runTest('Shrnutí změn: Krok 2 pro referenci, Krok 4 pro vybraný jazyk', async () => {
+  const { window, document } = createDomEnvironment();
+  document.getElementById('loadSampleBtn').click();
+  document.getElementById('confirmMappingBtn').click();
+
+  document.getElementById('step2ExportMdBtn').click();
+  const refMd = window.__downloads.pop();
+  assert.strictEqual(refMd.name, 'ukazkovy_dokument_zmeny_DE_2026_Referenz.md');
+  const refText = await readBlobText(window, refMd.blob);
+  assert.ok(refText.includes('# Shrnutí změn – DE 2026 (Referenz)') && refText.includes('| **Celkem odstavců** | 15 | 100% |'));
+
+  document.getElementById('goToTranslationBtn').click();
+  Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab')).find(t => t.textContent.includes('CS')).click();
+  typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Dary nově do 50 eur.');
+  document.getElementById('goToExportBtn').click();
+
+  document.getElementById('downloadMgrMdBtn').click();
+  const csMd = await readBlobText(window, window.__downloads.pop().blob);
+  assert.ok(csMd.includes('# Shrnutí změn – CS (stará → nová verze)'));
+  assert.ok(csMd.includes('Dary nově do 50 eur.'), 'Obsahuje novou verzi jazyka');
+  assert.ok(csMd.includes('### Stav překladu'));
+  assert.ok(!csMd.includes('Geschenke und Einladungen dürfen nur'), 'Obsahuje jazyk, ne referenci');
+
+  document.getElementById('downloadMgrDocBtn').click();
+  const doc = window.__downloads.pop();
+  assert.ok(doc.name.endsWith('_CS.doc'));
+  assert.ok((await readBlobText(window, doc.blob)).includes('urn:schemas-microsoft-com:office:word'));
+
+  document.getElementById('printMgrPdfBtn').click();
+  assert.ok(window.__printWindows.pop().html.includes('Shrnutí změn – CS'));
+  assert.ok(!toastTexts(document).some(t => /mgrExport/.test(t)));
+});
+
+runTest('Hlavička dokumentu: modální okno bez přednastavených textů, uložení a použití', async () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  document.getElementById('goToExportBtn').click();
+  document.getElementById('editPdfTemplateBtn').click();
+
+  assert.ok(document.getElementById('pdfTemplateModal').classList.contains('open'));
+  assert.strictEqual(document.getElementById('tplCompanyName').value, '');
+  assert.strictEqual(document.getElementById('tplDocTitle').value, 'ukazkovy_dokument');
+  assert.strictEqual(document.getElementById('tplDocSubtitle').value, '{LANG}');
+  assert.strictEqual(document.getElementById('tplShowSignatures').checked, false);
+
+  document.getElementById('tplCompanyName').value = 'Holding a.s.';
+  document.getElementById('tplDocTitle').value = 'Provozní řád';
+  document.getElementById('tplAccentColor').value = '#7c3aed';
+  document.getElementById('tplShowSignatures').checked = true;
+  document.getElementById('tplSignDept1').value = 'Ředitel';
+  document.getElementById('savePdfTemplateBtn').click();
+  assert.ok(!document.getElementById('pdfTemplateModal').classList.contains('open'));
+
+  document.getElementById('printPdfBtn').click();
+  const html = window.__printWindows.pop().html;
+  ['Holding a.s.', 'Provozní řád', '#7c3aed', 'Ředitel', '<div class="doc-subtitle">CS</div>'].forEach(p => assert.ok(html.includes(p), p));
+});
+
+runTest('Autosave: uložení do prohlížeče a obnovení po znovuotevření', async () => {
+  const env1 = createDomEnvironment();
+  openCzechStudio(env1.window);
+  typeInto(env1.window, env1.document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Automaticky uložený text');
+  assert.strictEqual(env1.document.getElementById('saveStatusText').textContent, 'Ukládám...');
+  env1.window.dispatchEvent(new env1.window.Event('pagehide'));
+  assert.strictEqual(env1.document.getElementById('saveStatusText').textContent, 'Vše uloženo');
+  const stored = env1.window.localStorage.getItem('ethic_comparator_workspace_v1');
+  assert.ok(stored.includes('Automaticky uložený text'));
+
+  const env2 = createDomEnvironment({ acceptResume: true, beforeInit: (w) => w.localStorage.setItem('ethic_comparator_workspace_v1', stored) });
+  await sleep(150);
+  assert.strictEqual(env2.document.getElementById('step3Section').style.display, 'block');
+  assert.strictEqual(env2.document.getElementById('article-card-3').querySelector('textarea').value, 'Automaticky uložený text');
+});
+
+runTest('Autosave: selhání ukládání je viditelně oznámeno', () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  const proto = Object.getPrototypeOf(window.localStorage);
+  const original = proto.setItem;
   const originalWarn = window.console.warn;
+  proto.setItem = function (key, value) {
+    if (key === 'ethic_comparator_workspace_v1') throw new Error('QuotaExceededError');
+    return original.call(this, key, value);
+  };
   window.console.warn = () => {};
   try {
-    typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Text, který se neuloží');
+    typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'x');
     window.StorageManager.flushPendingSave();
   } finally {
-    storageProto.setItem = originalSetItem;
+    proto.setItem = original;
     window.console.warn = originalWarn;
   }
-
-  assert.ok(document.getElementById('saveIndicator').classList.contains('save-error'), 'Indikátor je v chybovém stavu');
-  assert.ok(document.getElementById('saveStatusText').textContent.includes('Neuloženo'), 'Text indikátoru varuje');
-  assert.ok(toastTexts(document).some(t => t.includes('exportem projektu')), 'Uživatel dostane radu, jak práci zálohovat');
+  assert.ok(document.getElementById('saveIndicator').classList.contains('save-error'));
+  assert.ok(toastTexts(document).some(t => t.includes('Uložit projekt')));
 });
 
-// TEST 22: Nahrání skutečného Excel souboru + automatická detekce sloupců
-runTest('Excel Upload: Nahrání vzorového .xlsx souboru detekuje referenční i cílové sloupce', async () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
+// Nahrání souborů
+runTest('Nahrání .xlsx: žádné hádání jazyků podle názvů – reference vybírá uživatel, jazyky jsou textové sloupce', async () => {
+  const { window, document } = createDomEnvironment();
   const bytes = fs.readFileSync(path.join(__dirname, '..', 'sample', 'vzorec_eticky_kodex_2024_2026.xlsx'));
-  window.__app.processUploadedFile(new window.File([bytes], 'vzorec_eticky_kodex_2024_2026.xlsx'));
+  window.__app.processUploadedFile(new window.File([bytes], 'data.xlsx'));
   await sleep(100);
+  const st = window.__app.state;
 
-  assert.strictEqual(window.__lastAlert, undefined, 'Bez chyby: ' + window.__lastAlert);
-  const state = window.__app.state;
-  assert.strictEqual(state.rows.length, 15);
-  assert.strictEqual(state.headers[0], 'Artikel-Nr.', 'Pořadí sloupců odpovídá souboru');
-  assert.strictEqual(state.mappings.refOldCol, 'DE 2024 (Referenz)');
-  assert.strictEqual(state.mappings.refNewCol, 'DE 2026 (Referenz)');
-  assert.deepStrictEqual(plain(state.mappings.targetCols), ['EN 2024', 'CS 2024', 'FR 2024', 'ES 2024', 'IT 2024', 'PL 2024', 'NL 2024', 'SK 2024', 'HU 2024', 'RO 2024'],
-    'Cílové jazyky jsou přesně jazykové sloupce (ne ID ani oblast)');
-  assert.strictEqual(document.getElementById('refOldSelect').value, 'DE 2024 (Referenz)');
+  assert.strictEqual(st.rows.length, 15);
+  assert.strictEqual(st.mappings.refOldCol, '', 'Reference se nevybírá automaticky');
+  assert.strictEqual(document.getElementById('refOldSelect').value, '');
+  assert.ok(st.mappings.targetCols.includes('DE 2024 (Referenz)') && !st.mappings.targetCols.includes('Artikel-Nr.') && !st.mappings.targetCols.includes('Bereich'),
+    'Předvybrány jsou sloupce s delším textem, ne podle názvu');
+
+  setSelect(window, document.getElementById('refOldSelect'), 'DE 2024 (Referenz)');
+  setSelect(window, document.getElementById('refNewSelect'), 'DE 2026 (Referenz)');
+  assert.strictEqual(st.mappings.targetCols.length, 10, 'Referenční sloupce zmizely z jazyků');
+  document.getElementById('confirmMappingBtn').click();
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'block');
 });
 
-runTest('CSV Upload: UTF-8 CSV zachová diakritiku a nový soubor zahodí překlady předchozího', async () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
+runTest('Nahrání .xlsx s existujícím (téměř prázdným) sloupcem nové verze: spárování, předvyplnění a export do stejného sloupce', async () => {
+  const { window, document } = createDomEnvironment();
+  const file = workbookFile(window, {
+    List1: [
+      ['EN old', 'EN new', 'CZ old', 'CZ new', 'Poznámka'],
+      ['Same paragraph text here.', 'Same paragraph text here.', 'Stejný text odstavce.', '', 'x'],
+      ['The limit is thirty-five euro.', 'The limit is fifty euro.', 'Limit je třicet pět eur.', 'Limit je padesát eur.', ''],
+      ['Removed paragraph of the text.', '', 'Zrušený odstavec textu.', '', '']
+    ]
+  });
+  window.__app.processUploadedFile(file);
+  await sleep(100);
+  const st = window.__app.state;
 
-  // Rozpracovaný projekt z ukázky
+  setSelect(window, document.getElementById('refOldSelect'), 'EN old');
+  setSelect(window, document.getElementById('refNewSelect'), 'EN new');
+  assert.deepStrictEqual(plain(st.mappings.targetCols), ['CZ old']);
+  // Bez společného čísla verze uživatel vybere existující sloupec ručně
+  setSelect(window, langRow(document, 'CZ old').querySelector('.lang-newcol-select'), 'CZ new');
+  assert.ok(langRow(document, 'CZ new').textContent.includes('nová verze jazyka CZ old'));
+
+  document.getElementById('confirmMappingBtn').click();
+  document.getElementById('goToTranslationBtn').click();
+  const stubs = st.translations['CZ old'];
+  assert.strictEqual(stubs[1].targetNew, 'Limit je padesát eur.', 'Text z existujícího sloupce je předvyplněn');
+  assert.strictEqual(stubs[1].isVerified, false, 'a čeká na kontrolu');
+  assert.strictEqual(document.getElementById('article-card-1').querySelector('textarea').value, 'Limit je padesát eur.');
+
+  document.getElementById('goToExportBtn').click();
+  document.getElementById('downloadComprehensiveBtn').click();
+  const sheet = window.__workbooks.pop().wb.Sheets.Srovnani;
+  assert.deepStrictEqual(plain(window.XLSX.utils.sheet_to_json(sheet, { header: 1 })[0]), ['EN old', 'EN new', 'CZ old', 'CZ new', 'Poznámka'], 'Žádný nový sloupec');
+  const rows = window.XLSX.utils.sheet_to_json(sheet, { defval: '' });
+  assert.strictEqual(rows[0]['CZ new'], 'Stejný text odstavce.', 'Prázdná buňka doplněna');
+  assert.strictEqual(rows[1]['CZ new'], 'Limit je padesát eur.');
+});
+
+runTest('Nahrání .xlsx: automatické spárování podle čísla verze v referenci (CS 2024 → CS 2026)', async () => {
+  const { window, document } = createDomEnvironment();
+  window.__app.processUploadedFile(workbookFile(window, {
+    Data: [
+      ['EN 2024', 'EN 2026', 'CS 2024', 'CS 2026'],
+      ['A longer paragraph that stays the same.', 'A longer paragraph that stays the same.', 'Delší odstavec, který zůstává stejný.', ''],
+      ['Another long paragraph with old wording.', 'Another long paragraph with new wording.', 'Další dlouhý odstavec se starým zněním.', '']
+    ]
+  }));
+  await sleep(100);
+  setSelect(window, document.getElementById('refOldSelect'), 'EN 2024');
+  setSelect(window, document.getElementById('refNewSelect'), 'EN 2026');
+  const st = window.__app.state;
+  assert.deepStrictEqual(plain(st.mappings.targetCols), ['CS 2024']);
+  assert.strictEqual(st.mappings.languages['CS 2024'].newCol, 'CS 2026');
+  assert.strictEqual(langRow(document, 'CS 2024').querySelector('.lang-label-input').value, 'CS');
+});
+
+runTest('List bez řádku záhlaví: sloupce A, B, C…, první řádek jsou data, název jazyka zadá uživatel', async () => {
+  const { window, document } = createDomEnvironment();
+  window.__app.processUploadedFile(workbookFile(window, {
+    Data: [
+      ['Old paragraph one text.', 'New paragraph one text.', 'Starý text odstavce jedna.'],
+      ['Paragraph two stays as it is.', 'Paragraph two stays as it is.', 'Odstavec dva zůstává.']
+    ]
+  }));
+  await sleep(100);
+  const st = window.__app.state;
+  assert.strictEqual(st.rows.length, 1, 'S výchozím nastavením je první řádek záhlaví');
+
+  const headerCb = document.getElementById('hasHeaderRowCheckbox');
+  headerCb.checked = false;
+  headerCb.dispatchEvent(new window.Event('change'));
+  assert.strictEqual(st.rows.length, 2, 'První řádek je teď data');
+  assert.deepStrictEqual(plain(st.headers), ['A', 'B', 'C']);
+  assert.deepStrictEqual(plain(st.rowNumbers), [1, 2]);
+  assert.strictEqual(document.getElementById('refOldSelect').options[1].textContent, 'Sloupec A');
+
+  setSelect(window, document.getElementById('refOldSelect'), 'A');
+  setSelect(window, document.getElementById('refNewSelect'), 'B');
+  const label = langRow(document, 'C').querySelector('.lang-label-input');
+  assert.strictEqual(label.value, 'Sloupec C');
+  label.value = 'Čeština';
+  label.dispatchEvent(new window.Event('input'));
+  document.getElementById('confirmMappingBtn').click();
+  document.getElementById('goToTranslationBtn').click();
+  assert.ok(document.querySelector('#langTabsWrapper .lang-tab').textContent.includes('Čeština'));
+  assert.strictEqual(document.getElementById('article-card-0').querySelector('.article-id').textContent, 'Řádek 1');
+});
+
+runTest('CSV: UTF-8 diakritika, odstranění bílých znaků na okrajích buněk a zahození předchozí práce', async () => {
+  const { window, document } = createDomEnvironment();
   openCzechStudio(window);
   typeInto(window, document.getElementById('article-card-0').querySelector('textarea.target-textarea'), 'STARÁ PRÁCE');
 
-  const csv = '﻿ID;DE 2024;DE 2026;CS 2024\n1;Größe;Größe neu;Příliš žluťoučký kůň\n2;Gleich;Gleich;Stejné\n';
-  window.__app.processUploadedFile(new window.File([csv], 'kodex.csv', { type: 'text/csv' }));
+  const longCell = '\n\n   ' + 'Velmi dlouhý text bez zalomení řádku. '.repeat(10).trim() + '   \n';
+  const csv = '﻿Ref old;Ref new;Čeština\nGröße alt;Größe neu;' + '"' + longCell + '"' + '\n';
+  window.__app.processUploadedFile(new window.File([csv], 'data.csv', { type: 'text/csv' }));
   await sleep(100);
 
-  const state = window.__app.state;
-  assert.strictEqual(state.rows[0]['DE 2024'], 'Größe', 'Přehlásky jsou zachovány');
-  assert.strictEqual(state.rows[0]['CS 2024'], 'Příliš žluťoučký kůň', 'Česká diakritika je zachována');
-  assert.deepStrictEqual(plain(state.headers), ['ID', 'DE 2024', 'DE 2026', 'CS 2024']);
-  assert.deepStrictEqual(plain(state.translations), {}, 'Překlady předchozího souboru byly zahozeny');
-  assert.strictEqual(state.mappings.refOldCol, 'DE 2024');
-  assert.deepStrictEqual(plain(state.mappings.targetCols), ['CS 2024']);
-
-  document.getElementById('confirmMappingBtn').click();
-  document.getElementById('goToTranslationBtn').click();
-  const stubs = state.translations['CS 2024'];
-  assert.ok(!stubs.some(s => s.targetNew === 'STARÁ PRÁCE'), 'Stará práce se neobjeví u nových řádků');
-  assert.strictEqual(stubs[1].targetNew, 'Stejné', 'Nezměněný řádek nového souboru je převzat');
+  const st = window.__app.state;
+  assert.strictEqual(st.rows[0]['Ref new'], 'Größe neu');
+  assert.ok(st.rows[0]['Čeština'].startsWith('Velmi dlouhý text') && st.rows[0]['Čeština'].endsWith('řádku.'), 'Bílé znaky na začátku a konci odstraněny');
+  assert.deepStrictEqual(plain(st.translations), {});
+  const previewCell = document.querySelectorAll('#previewTableBody tr')[0].querySelectorAll('td')[3];
+  assert.ok(previewCell.textContent.startsWith('Velmi dlouhý text'), 'Náhled neukazuje prázdnou buňku');
 });
 
-// TEST 24: Navigace nepustí uživatele dál s neplatným mapováním
-runTest('Step Guards: Krok 2/3 se neotevře bez platného mapování sloupců', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
-
+runTest('Navigace: Krok 2/3 se neotevře bez platného výběru sloupců', () => {
+  const { window, document } = createDomEnvironment();
   document.getElementById('stepNav3').click();
-  assert.notStrictEqual(document.getElementById('step1Section').style.display, 'none', 'Bez dat zůstává Krok 1');
   assert.strictEqual(document.getElementById('step3Section').style.display, 'none');
 
   document.getElementById('loadSampleBtn').click();
-  const refNewSelect = document.getElementById('refNewSelect');
-  refNewSelect.value = 'DE 2024 (Referenz)';
-  refNewSelect.onchange();
-
+  setSelect(window, document.getElementById('refNewSelect'), 'DE 2024 (Referenz)');
   document.getElementById('stepNav2').click();
-  assert.strictEqual(document.getElementById('step2Section').style.display, 'none', 'Stejné referenční sloupce nepustí do Kroku 2');
-  assert.ok(toastTexts(document).some(t => t.includes('musí být rozdílné')), 'Uživatel vidí důvod');
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'none');
+  assert.ok(toastTexts(document).some(t => t.includes('různé sloupce')));
 });
 
-runTest('Modals: Escape a klik na pozadí zavřou modální okno', () => {
-  const { window } = createDomEnvironment();
-  const document = window.document;
+runTest('Modální okna: Escape a klik na pozadí je zavřou', () => {
+  const { window, document } = createDomEnvironment();
   const modal = document.getElementById('promptSettingsModal');
-
   document.getElementById('settingsPromptBtn').click();
   assert.ok(modal.classList.contains('open'));
   document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  assert.ok(!modal.classList.contains('open'), 'Escape zavře okno');
-
+  assert.ok(!modal.classList.contains('open'));
   document.getElementById('settingsPromptBtn').click();
   modal.dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-  assert.ok(!modal.classList.contains('open'), 'Klik na pozadí zavře okno');
+  assert.ok(!modal.classList.contains('open'));
 });
 
 // Výsledky
@@ -1181,4 +848,3 @@ runAllTests().then(() => {
   console.log('========================================\n');
   process.exit(failedTests > 0 ? 1 : 0);
 });
-
