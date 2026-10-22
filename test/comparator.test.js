@@ -351,23 +351,91 @@ runTest('StorageManager: uložení a načtení projektu zachová práci, jazyky,
   assert.deepStrictEqual(rehydrated, czech);
 });
 
-runTest('StorageManager: chybné soubory jsou odmítnuty, starší soubory doplněny o výchozí hodnoty', () => {
-  const valid = { app: 'EthicCodeComparator', headers: ['A', 'B'], rows: [{ A: 'x', B: 'y' }], mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: [] } };
-  assert.throws(() => StorageManager.parseProjectJson('{ not json'), /platný JSON/);
-  assert.ok(StorageManager.parseProjectJson(JSON.stringify({ ...valid, app: 'InternationalisationManager' })), 'Aktuální identifikátor aplikace');
-  assert.ok(StorageManager.parseProjectJson(JSON.stringify(valid)), 'Soubory pod původním názvem projektu se stále načtou');
-  assert.throws(() => StorageManager.parseProjectJson(JSON.stringify({ ...valid, app: 'Jina' })), /nepatří/);
-  assert.throws(() => StorageManager.parseProjectJson(JSON.stringify({ ...valid, rows: [] })), /rows/);
-  assert.throws(() => StorageManager.parseProjectJson(JSON.stringify({ ...valid, mappings: { refOldCol: 'A', refNewCol: 'X' } })), /"X"/);
-  assert.throws(() => StorageManager.parseProjectJson(JSON.stringify({
+runTest('StorageManager: soubory, které nejsou projektem nebo jsou poškozené, se odmítnou s kódem problému', () => {
+  const valid = { app: 'InternationalisationManager', headers: ['A', 'B'], rows: [{ A: 'x', B: 'y' }], mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: [] } };
+  const codeOf = (content) => {
+    try {
+      StorageManager.parseProjectJson(typeof content === 'string' ? content : JSON.stringify(content));
+      return 'OK';
+    } catch (e) {
+      return e.code;
+    }
+  };
+
+  assert.strictEqual(codeOf(valid), 'OK');
+  assert.strictEqual(codeOf({ ...valid, app: 'EthicCodeComparator' }), 'OK', 'Soubory pod původním názvem projektu se stále načtou');
+
+  // Není to JSON (např. omylem vybraný sešit)
+  assert.strictEqual(codeOf('{ not json'), 'INVALID_JSON');
+  assert.strictEqual(codeOf('PK\u0003\u0004 binary spreadsheet'), 'INVALID_JSON');
+  // JSON s jinou strukturou – nejde o projekt překladu
+  assert.strictEqual(codeOf({}), 'NOT_A_PROJECT');
+  assert.strictEqual(codeOf([1, 2, 3]), 'NOT_A_PROJECT');
+  assert.strictEqual(codeOf('"text"'), 'NOT_A_PROJECT');
+  assert.strictEqual(codeOf('null'), 'NOT_A_PROJECT');
+  assert.strictEqual(codeOf({ hello: 'Ahoj', bye: 'Nashle' }), 'NOT_A_PROJECT', 'Překladový JSON jiné aplikace (klíč → text)');
+  try {
+    StorageManager.parseProjectJson(JSON.stringify({ name: 'pkg', version: '1.0.0', dependencies: {} }));
+  } catch (e) {
+    assert.strictEqual(e.params.FOUND, 'name, version, dependencies', 'Chyba uvádí, co soubor obsahuje');
+  }
+  assert.strictEqual(codeOf({ ...valid, app: 'JinaAplikace' }), 'FOREIGN_APP');
+  // Projekt, ale poškozený
+  assert.strictEqual(codeOf({ ...valid, rows: [] }), 'NO_ROWS');
+  assert.strictEqual(codeOf({ ...valid, rows: 'x' }), 'NO_ROWS');
+  assert.strictEqual(codeOf({ ...valid, rows: [1, 2] }), 'BAD_ROWS');
+  assert.strictEqual(codeOf({ ...valid, rows: [['A', 'B']] }), 'BAD_ROWS');
+  assert.strictEqual(codeOf({ ...valid, mappings: 'A,B' }), 'BAD_MAPPINGS');
+  assert.strictEqual(codeOf({ ...valid, mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: 'C' } }), 'BAD_MAPPINGS');
+  assert.strictEqual(codeOf({ ...valid, mappings: { refOldCol: 'A', refNewCol: 'X' } }), 'MISSING_COLUMN');
+  assert.strictEqual(codeOf({
     ...valid, headers: ['A', 'B', 'C'], rows: [{ A: 1, B: 2, C: 3 }],
     mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: ['C'], languages: { C: { newCol: 'CHYBÍ' } } }
-  })), /CHYBÍ/, 'Neexistující sloupec nové verze');
+  }), 'MISSING_COLUMN', 'Neexistující sloupec nové verze');
+});
 
-  const legacy = StorageManager.parseProjectJson('﻿' + JSON.stringify({ rows: [{ A: 'x', B: 'y', C: 'z' }], mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: ['C'] } }));
+runTest('StorageManager: načitatelný projekt s nesrovnalostmi vrátí upozornění a bezpečné hodnoty', () => {
+  const ok = StorageManager.parseProjectJson(JSON.stringify({
+    app: 'InternationalisationManager', headers: ['A', 'B'], rows: [{ A: 'x', B: 'y' }], mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: [] }
+  }));
+  assert.deepStrictEqual(ok.warnings, [], 'Správný soubor nemá upozornění');
+
+  const legacy = StorageManager.parseProjectJson('\uFEFF' + JSON.stringify({ rows: [{ A: 'x', B: 'y', C: 'z' }], mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: ['C'] } }));
   assert.deepStrictEqual(legacy.headers, ['A', 'B', 'C']);
   assert.deepStrictEqual(legacy.mappings.languages, { C: { label: '', newCol: '', newColName: '' } });
   assert.deepStrictEqual(legacy.rowNumbers, [2]);
+  assert.deepStrictEqual(legacy.warnings.map(w => w.code), ['NO_APP_ID'], 'Soubor bez označení aplikace');
+
+  const odd = StorageManager.parseProjectJson(JSON.stringify({
+    app: 'InternationalisationManager',
+    version: '99.0.0',
+    headers: ['A', 'B', 'C', 'D'],
+    rows: [{ A: 'a', B: 'b', C: 'c', D: 'd' }, { A: 'a2', B: 'b2', C: 'c2', D: 'd2' }],
+    rowNumbers: ['x', 'y'],
+    mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: ['C'], languages: { C: { label: 'Čeština' } } },
+    translations: { C: [{ targetNew: 'jedna' }, 'chyba', { targetNew: 'navíc' }], D: [{ targetNew: 'neužitý' }] },
+    pdfTemplate: 'blue',
+    partialContextCols: 'A'
+  }));
+  assert.deepStrictEqual(odd.warnings.map(w => w.code), ['NEWER_VERSION', 'ROW_COUNT_MISMATCH', 'UNUSED_TRANSLATIONS', 'INVALID_TRANSLATIONS', 'INVALID_SETTINGS']);
+  assert.deepStrictEqual(odd.warnings[1].params, { LANG: 'Čeština', COUNT: 3, ROWS: 2 });
+  assert.strictEqual(odd.warnings[2].params.LIST, 'D');
+  assert.deepStrictEqual(odd.translations, { C: [{ targetNew: 'jedna' }, null, { targetNew: 'navíc' }] }, 'Neplatné položky a nevybrané jazyky jsou vynechány');
+  assert.deepStrictEqual(odd.rowNumbers, [2, 3], 'Neplatná čísla řádků se nahradí výchozími');
+  assert.strictEqual(odd.pdfTemplate, null);
+  assert.strictEqual(odd.partialContextCols, null);
+});
+
+runTest('StorageManager: uložený projekt se načte bez upozornění (skutečný serializér)', () => {
+  const g = genericTable();
+  const json = StorageManager.serializeProjectJson({
+    fileName: 'data.xlsx', headers: g.headers, rows: g.rows, rowNumbers: g.rowNumbers, mappings: g.mappings,
+    translations: { Czech: ComparatorEngine.generateTargetStub(g.rows, 'Czech', g.mappings.refOldCol, g.mappings.refNewCol, 'Czech new') },
+    pdfTemplate: { docTitle: 'X' }, partialContextCols: ['Notes']
+  });
+  const parsed = StorageManager.parseProjectJson(json);
+  assert.deepStrictEqual(parsed.warnings, []);
+  assert.strictEqual(JSON.parse(json).version, StorageManager.PROJECT_VERSION);
 });
 
 runTest('rehydrateStubs: změna klasifikace (jiné referenční sloupce) zruší schválení, text zůstane', () => {

@@ -23,7 +23,9 @@ function runTest(name, fn) {
 }
 
 async function runAllTests() {
-  for (const test of tests) {
+  // ONLY=<text> runs just the tests whose name contains the text
+  const only = process.env.ONLY;
+  for (const test of tests.filter(t => !only || t.name.includes(only))) {
     try {
       await test.fn();
       console.log(`  ✓ ${test.name}`);
@@ -123,7 +125,8 @@ function createDomEnvironment(options) {
   // The "resume autosaved project?" prompt is declined unless a test asks for it
   window.confirm = (msg) => {
     window.__lastConfirm = msg;
-    return /rozpracovaný projekt|saved project/.test(msg) ? !!opts.acceptResume : true;
+    if (window.__confirmAnswer !== undefined) return window.__confirmAnswer;
+    return /rozpracovaný projekt z|saved project from/.test(msg) ? !!opts.acceptResume : true;
   };
   window.scrollTo = () => {};
   window.Element.prototype.scrollIntoView = () => {};
@@ -201,6 +204,16 @@ function setSelect(window, select, value) {
 }
 
 // TEST 1: Inicializace GUI a přepínání jazyků
+runTest('Aplikace se inicializuje jen jednou (i když DOMContentLoaded přijde znovu)', async () => {
+  const { window, document } = createDomEnvironment();
+  await sleep(20);
+  document.dispatchEvent(new window.Event('DOMContentLoaded'));
+  document.getElementById('langToggleBtn').click();
+  assert.strictEqual(window.I18n.getLanguage(), 'en', 'Jedno kliknutí přepne jazyk právě jednou');
+  document.getElementById('loadSampleBtn').click();
+  assert.strictEqual(toastTexts(document).filter(t => t.includes('Sample data loaded')).length, 1, 'Akce proběhne jednou');
+});
+
 runTest('GUI Boot: výchozí zobrazení, obecné texty a přepínání jazyků CZ/EN', () => {
   const { document } = createDomEnvironment();
 
@@ -424,6 +437,109 @@ runTest('Projekt: tlačítka v záhlaví (i v Kroku 3) uloží a načtou komplet
   assert.strictEqual(restored.querySelector('textarea').value, 'MŮJ TEXT ČLÁNKU 4');
   assert.strictEqual(restored.querySelector('.verify-checkbox').checked, true);
   assert.deepStrictEqual(plain(env2.window.__app.state.pdfTemplate), { docTitle: 'Můj dokument' });
+});
+
+// Načítání souborů projektu: chybné a neočekávané soubory
+async function loadProject(window, content, name) {
+  window.__lastAlert = undefined;
+  window.__app.loadProjectFile(new window.File([content], name || 'projekt.json', { type: 'application/json' }));
+  await sleep(50);
+}
+
+runTest('Načtení projektu: JSON s jinou strukturou je odmítnut s varováním a rozpracovaná práce zůstane', async () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Moje rozpracovaná práce');
+  window.__lastConfirm = undefined;
+
+  const cases = [
+    ['{"hello":"Ahoj","bye":"Nashle"}', 'preklady.json', /preklady\.json.*jinou strukturou.*nejde o projekt překladu.*nalezeno: hello, bye/],
+    ['[1, 2, 3]', 'seznam.json', /jinou strukturou/],
+    ['{"app":"NejakaJinaAplikace","rows":[]}', 'jiny.json', /patří jiné aplikaci \(NejakaJinaAplikace\)/],
+    ['{ tohle není json', 'rozbity.json', /není platný soubor projektu/],
+    ['{"rows":[1,2],"mappings":{}}', 'poskozeny.json', /poškozený: řádek 1/]
+  ];
+  for (const [content, name, pattern] of cases) {
+    await loadProject(window, content, name);
+    assert.ok(pattern.test(window.__lastAlert), name + ': ' + window.__lastAlert);
+    assert.ok(window.__lastAlert.endsWith('Aktuální práce zůstala beze změny.'), name);
+  }
+  assert.strictEqual(window.__lastConfirm, undefined, 'U neplatného souboru se na nahrazení práce vůbec neptá');
+  assert.strictEqual(document.getElementById('step3Section').style.display, 'block', 'Zůstává Krok 3');
+  assert.strictEqual(document.getElementById('article-card-3').querySelector('textarea').value, 'Moje rozpracovaná práce');
+  assert.strictEqual(window.__app.state.translations['CS 2024'][3].targetNew, 'Moje rozpracovaná práce');
+});
+
+runTest('Načtení projektu: omylem vybraná tabulka dostane radu, kde ji nahrát (i v angličtině)', async () => {
+  const { window, document } = createDomEnvironment();
+  const bytes = fs.readFileSync(path.join(__dirname, '..', 'sample', 'ukazkovy_dokument.xlsx'));
+  await loadProject(window, bytes, 'tabulka.xlsx');
+  assert.ok(/tabulka\.xlsx.*je tabulka, ne soubor projektu.*Kroku 1/.test(window.__lastAlert), window.__lastAlert);
+
+  document.getElementById('langToggleBtn').click();
+  await loadProject(window, '{}', 'empty.json');
+  assert.ok(/"empty\.json" is JSON with a different structure, not a translation project/.test(window.__lastAlert), window.__lastAlert);
+  assert.ok(window.__lastAlert.endsWith('Your current work is unchanged.'));
+});
+
+runTest('Načtení projektu: nahrazení rozpracované práce je třeba potvrdit', async () => {
+  const env1 = createDomEnvironment();
+  openCzechStudio(env1.window);
+  env1.window.__app.state.pdfTemplate = { docTitle: 'Projekt A' };
+  env1.document.getElementById('saveProjectBtn').click();
+  const projectA = await readBlobText(env1.window, env1.window.__downloads.pop().blob);
+
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Neuložená práce B');
+
+  window.__confirmAnswer = false;
+  await loadProject(window, projectA, 'projekt_A.json');
+  assert.ok(/Načtením projektu „projekt_A\.json“ se nahradí aktuální rozpracovaná práce/.test(window.__lastConfirm));
+  assert.strictEqual(document.getElementById('article-card-3').querySelector('textarea').value, 'Neuložená práce B', 'Po odmítnutí zůstane práce B');
+
+  window.__confirmAnswer = true;
+  await loadProject(window, projectA, 'projekt_A.json');
+  assert.deepStrictEqual(plain(window.__app.state.pdfTemplate), { docTitle: 'Projekt A' }, 'Po potvrzení je načten projekt A');
+  assert.strictEqual(window.__app.state.translations['CS 2024'][3].targetNew, '', 'Neuložená práce B byla nahrazena');
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'block', 'Projekt bez úprav se otevře v Kroku 2');
+  assert.ok(toastTexts(document).some(t => t.includes('Projekt byl načten.')));
+});
+
+runTest('Načtení projektu: nesrovnalosti, které nebrání načtení, se zobrazí jako upozornění', async () => {
+  const env1 = createDomEnvironment();
+  openCzechStudio(env1.window);
+  env1.document.getElementById('saveProjectBtn').click();
+  const saved = JSON.parse(await readBlobText(env1.window, env1.window.__downloads.pop().blob));
+  saved.version = '99.0.0';
+  saved.translations['CS 2024'] = saved.translations['CS 2024'].slice(0, 10);
+  saved.translations['Bereich'] = [{ targetNew: 'něco' }];
+
+  const { window, document } = createDomEnvironment();
+  await loadProject(window, JSON.stringify(saved), 'upraveny.json');
+  assert.strictEqual(window.__lastAlert, undefined, String(window.__lastAlert));
+  assert.ok(toastTexts(document).some(t => t.includes('Projekt byl načten.')));
+  const warning = toastTexts(document).find(t => t.includes('načten s upozorněním'));
+  assert.ok(warning, 'Zobrazí se upozornění');
+  assert.ok(warning.includes('novější verze aplikace (99.0.0)'));
+  assert.ok(warning.includes('jazyk CS má uloženo 10 textů, ale tabulka má 15 řádků'));
+  assert.ok(warning.includes('(Bereich)'));
+  assert.strictEqual(document.getElementById('step2Section').style.display === 'block' || document.getElementById('step3Section').style.display === 'block', true);
+});
+
+runTest('Načtení projektu: soubor .json přetažený do oblasti pro nahrání v Kroku 1 se otevře jako projekt', async () => {
+  const env1 = createDomEnvironment();
+  openCzechStudio(env1.window);
+  typeInto(env1.window, env1.document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Text z přetaženého projektu');
+  env1.document.getElementById('saveProjectBtn').click();
+  const json = await readBlobText(env1.window, env1.window.__downloads.pop().blob);
+
+  const { window, document } = createDomEnvironment();
+  window.__app.processUploadedFile(new window.File([json], 'projekt.json', { type: 'application/json' }));
+  await sleep(50);
+  assert.strictEqual(window.__lastAlert, undefined, String(window.__lastAlert));
+  assert.strictEqual(document.getElementById('step3Section').style.display, 'block');
+  assert.strictEqual(document.getElementById('article-card-3').querySelector('textarea').value, 'Text z přetaženého projektu');
 });
 
 // Dokument pro tisk
@@ -754,9 +870,9 @@ runTest('Adaptéry: nový importér a exportér se použijí bez úprav aplikace
 
 runTest('Adaptéry: nepodporovaný soubor dá srozumitelnou chybu se seznamem formátů', async () => {
   const { window } = createDomEnvironment();
-  window.__app.processUploadedFile(new window.File(['{}'], 'data.json'));
+  window.__app.processUploadedFile(new window.File(['%PDF-1.4'], 'smlouva.pdf'));
   await sleep(50);
-  assert.ok(/data\.json.*\.xlsx.*\.csv/.test(window.__lastAlert), String(window.__lastAlert));
+  assert.ok(/smlouva\.pdf.*\.xlsx.*\.csv/.test(window.__lastAlert), String(window.__lastAlert));
 });
 
 runTest('Autosave: selhání ukládání je viditelně oznámeno', () => {

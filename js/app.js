@@ -497,21 +497,88 @@
     });
   }
 
+  const PROJECT_ERROR_KEYS = {
+    INVALID_JSON: 'projectErrInvalidJson',
+    NOT_A_PROJECT: 'projectErrNotProject',
+    FOREIGN_APP: 'projectErrForeignApp',
+    NO_ROWS: 'projectErrNoRows',
+    BAD_ROWS: 'projectErrBadRows',
+    BAD_MAPPINGS: 'projectErrBadMappings',
+    MISSING_COLUMN: 'projectErrMissingColumn'
+  };
+
+  const PROJECT_WARNING_KEYS = {
+    NO_APP_ID: 'projectWarnNoAppId',
+    NEWER_VERSION: 'projectWarnNewerVersion',
+    UNUSED_TRANSLATIONS: 'projectWarnUnusedTranslations',
+    ROW_COUNT_MISMATCH: 'projectWarnRowCountMismatch',
+    INVALID_TRANSLATIONS: 'projectWarnInvalidTranslations',
+    INVALID_SETTINGS: 'projectWarnInvalidSettings'
+  };
+
+  /**
+   * Translated explanation of why a file cannot be loaded as a project.
+   */
+  function projectErrorMessage(err, fileName) {
+    const params = Object.assign({ NAME: fileName || '' }, err && err.params);
+    let key = err && PROJECT_ERROR_KEYS[err.code];
+    // A spreadsheet picked in "Load project" by mistake
+    if (err && err.code === 'INVALID_JSON' && Importers.findForFile(fileName || '')) key = 'projectErrSpreadsheet';
+    const text = key ? t(key, params) : t('alertProjectLoadError', { MSG: err && err.message ? err.message : '' });
+    return text + ' ' + t('projectLoadKeptState');
+  }
+
+  function hasWorkInProgress() {
+    return Array.isArray(state.rows) && state.rows.length > 0;
+  }
+
+  /**
+   * Loads a project file (.json) saved with "Save project". The file is validated first; if it
+   * cannot be loaded, the current work stays untouched. Problems that did not prevent loading
+   * are shown as a warning.
+   */
   function loadProjectFile(file) {
     const reader = new FileReader();
     reader.onload = function (evt) {
+      let parsed;
       try {
-        const parsed = StorageManager.parseProjectJson(evt.target.result);
-        restoreProjectFromData(parsed);
-        persistState(0);
-        showToast(t('toastProjectLoaded'), 'success');
+        parsed = StorageManager.parseProjectJson(evt.target.result);
       } catch (err) {
+        console.warn(err);
+        alert(projectErrorMessage(err, file.name));
+        return;
+      }
+      if (hasWorkInProgress() && !confirm(t('confirmReplaceProject', { NAME: file.name }))) return;
+
+      const backup = hasWorkInProgress() ? JSON.parse(StorageManager.serializeProjectJson(state)) : null;
+      try {
+        restoreProjectFromData(parsed);
+      } catch (err) {
+        // Restoring failed half-way: go back to the previous work
         console.error(err);
-        alert(t('alertProjectLoadError', { MSG: err.message }));
+        if (backup) {
+          restoreProjectFromData(StorageManager.parseProjectJson(backup));
+        } else {
+          resetWorkspaceForNewTable();
+          state.rows = [];
+          state.headers = [];
+          setStep(1);
+        }
+        alert(t('alertProjectLoadError', { MSG: err.message }) + ' ' + t('projectLoadKeptState'));
+        return;
+      }
+      persistState(0);
+      showToast(t('toastProjectLoaded'), 'success');
+
+      const warnings = (parsed.warnings || []).map(function (w) {
+        return t(PROJECT_WARNING_KEYS[w.code] || w.code, w.params);
+      });
+      if (warnings.length > 0) {
+        showToast(t('projectLoadedWithWarnings') + ' ' + warnings.join(' • '), 'warning');
       }
     };
     reader.onerror = function () {
-      alert(t('alertProjectLoadError', { MSG: reader.error ? reader.error.message : '' }));
+      alert(t('alertProjectLoadError', { MSG: reader.error ? reader.error.message : file.name }));
     };
     reader.readAsText(file);
   }
@@ -540,6 +607,10 @@
    * Imports a file with the matching import adapter (see js/io/importers.js).
    */
   function processUploadedFile(file) {
+    if (!Importers.findForFile(file.name, file.type) && /\.json$/i.test(file.name)) {
+      loadProjectFile(file);
+      return Promise.resolve();
+    }
     return Importers.importFile(file).then(function (result) {
       state.fileName = file.name;
       state.importSource = result.source;
@@ -2285,7 +2356,7 @@
       restoreProjectFromData(StorageManager.parseProjectJson(stored));
     } catch (err) {
       console.error(err);
-      alert(t('alertProjectLoadError', { MSG: err.message }));
+      alert(projectErrorMessage(err, ''));
     }
   }
 
@@ -2328,9 +2399,14 @@
   }
 
   /**
-   * Main App Initialization
+   * Main App Initialization (runs once even if DOMContentLoaded is delivered more than once,
+   * otherwise every listener would be registered twice)
    */
+  let appInitialized = false;
+
   function initApp() {
+    if (appInitialized) return;
+    appInitialized = true;
     initLanguage();
     initTheme();
     initLayoutMode();

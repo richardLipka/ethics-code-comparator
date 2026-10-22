@@ -57,6 +57,8 @@ Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se 
 ### Uložení projektu
 - Tlačítka **💾 Uložit projekt** a **📂 Načíst projekt** jsou v záhlaví stránky ve všech krocích.
 - Soubor `.json` obsahuje tabulku, výběr sloupců, názvy jazyků, rozpracované texty, stav kontroly a nastavení šablon. U každého jazyka se ukládá jen vaše práce; ostatní texty se při načtení doplní z tabulky, takže soubor je malý. Soubory starších verzí aplikace se načtou také.
+- Načítaný soubor se nejprve zkontroluje. Pokud nejde o projekt překladu (jiný JSON, soubor jiné aplikace, omylem vybraná tabulka) nebo je poškozený, aplikace vysvětlí proč a **aktuální práce zůstane beze změny**. Drobné nesrovnalosti (např. soubor z novější verze, texty jazyka, který není vybraný, nesedící počet řádků) projekt nezablokují – zobrazí se jako upozornění.
+- Před nahrazením rozpracované práce jiným projektem se aplikace zeptá. Soubor projektu lze otevřít i přetažením do oblasti pro nahrání v Kroku 1.
 - Práce se průběžně ukládá i do prohlížeče (při zavření stránky okamžitě). Když se uložení nepodaří (např. plné úložiště), indikátor v záhlaví zčervená a aplikace vyzve k uložení projektu.
 
 ---
@@ -67,8 +69,8 @@ Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se 
 npm test
 ```
 
-- **Jádro a adaptéry (33 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty, Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér, úplnost a obecnost lokalizace.
-- **GUI v jsdom (31 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
+- **Jádro a adaptéry (35 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty, Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér, úplnost a obecnost lokalizace.
+- **GUI v jsdom (37 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
 
 V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlížeči.
 
