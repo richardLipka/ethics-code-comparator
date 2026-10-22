@@ -165,8 +165,8 @@
         <div id="dataPreviewContainer" class="data-preview-card" style="display:none; margin-top:1.5rem;">
           <div class="data-preview-header">
             <div>
-              <h2 style="font-size:0.95rem; font-weight:700; color:var(--text-heading);" data-i18n="previewTitle">👁️ Náhled prvních řádků načtené tabulky</h2>
-              <p style="font-size:0.8rem; color:var(--text-muted);" data-i18n="previewDesc">Rychlá vizuální kontrola struktury sešitu a správnosti záhlaví.</p>
+              <h2 style="font-size:0.95rem; font-weight:700; color:var(--text-heading);" data-i18n="previewTitle">👁️ Náhled řádků tabulky</h2>
+              <p style="font-size:0.8rem; color:var(--text-muted);" data-i18n="previewDesc">Zaškrtnutím „Přeskočit“ vyřadíte řádky, které se nemají zpracovat.</p>
             </div>
             <span style="font-size:0.75rem; color:var(--text-muted); font-weight:600;" id="previewRowsCount"></span>
           </div>
@@ -176,6 +176,7 @@
               <tbody id="previewTableBody"></tbody>
             </table>
           </div>
+          <button class="btn btn-outline btn-sm" id="previewShowMoreBtn" type="button" style="display:none; margin-top:0.6rem;"></button>
         </div>
 
       </div>

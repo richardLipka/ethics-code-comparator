@@ -321,6 +321,27 @@ runTest('Export tabulek + Excel adaptér (částečný): číslo řádku, vybran
   assert.deepStrictEqual(cz.headers, ['Řádek', 'Reference new', 'Polish', 'Czech', 'Czech new', 'Stav'], 'Vlastní sloupce jazyka se jako kontext nezdvojí');
 });
 
+runTest('Přeskočené řádky: kompletní export je vloží na původní místo beze změny, ostatní exporty je vynechají', () => {
+  const g = genericTable();
+  // Řádek 4 (Excel) byl přeskočen – ve zpracovaných řádcích chybí
+  const skippedRows = [{ rowNumber: 4, row: { 'Reference old': 'NADPIS', 'Reference new': 'NADPIS', Czech: 'NADPIS CZ', 'Czech new': 'stará data', Polish: '', Notes: 'pozn' } }];
+  const tables = ComparatorEngine.prepareExportTables({
+    rows: g.rows, headers: g.headers, mappings: g.mappings, rowNumbers: g.rowNumbers, translations: {}, skippedRows, uiLang: 'cs'
+  }).tables;
+  const main = tables[0].rows;
+  assert.deepStrictEqual(main.map(r => r['Reference old']), ['Same text.', 'Limit is 35 EUR.', 'NADPIS', '', 'Removed paragraph.'], 'Řazení podle čísel řádků 2, 3, 4, 5, 6');
+  assert.strictEqual(main[2]['Czech new'], 'stará data', 'Existující buňka přeskočeného řádku se nepřepíše');
+  assert.strictEqual(main[2]['Polish NEW'], '', 'Nový sloupec přeskočeného řádku zůstane prázdný');
+  assert.strictEqual(main[2].Notes, 'pozn');
+  assert.deepStrictEqual(tables[1].rows.map(r => r['Řádek']), [2, 3, 4, 5, 6]);
+  assert.deepStrictEqual([tables[1].rows[2]['Změna reference'], tables[1].rows[2]['Čeština']], ['Přeskočeno', 'Přeskočeno']);
+
+  const clean = ComparatorEngine.prepareExportTables({ rows: g.rows, headers: g.headers, mappings: g.mappings, translations: {}, skippedRows, exportType: 'clean' }).tables;
+  assert.ok(!clean[0].rows.some(r => r['Reference new'] === 'NADPIS'));
+  const partial = ComparatorEngine.prepareExportTables({ rows: g.rows, headers: g.headers, mappings: g.mappings, translations: {}, skippedRows, exportType: 'language', langCol: 'Polish' }).tables;
+  assert.strictEqual(partial[0].rows.length, 4);
+});
+
 // 7. Soubor projektu
 runTest('StorageManager: uložení a načtení projektu zachová práci, jazyky, čísla řádků a nastavení', () => {
   const g = genericTable();
@@ -431,10 +452,15 @@ runTest('StorageManager: uložený projekt se načte bez upozornění (skutečn�
   const json = StorageManager.serializeProjectJson({
     fileName: 'data.xlsx', headers: g.headers, rows: g.rows, rowNumbers: g.rowNumbers, mappings: g.mappings,
     translations: { Czech: ComparatorEngine.generateTargetStub(g.rows, 'Czech', g.mappings.refOldCol, g.mappings.refNewCol, 'Czech new') },
-    pdfTemplate: { docTitle: 'X' }, partialContextCols: ['Notes']
+    pdfTemplate: { docTitle: 'X' }, partialContextCols: ['Notes'],
+    skippedRows: [{ rowNumber: 4, row: { 'Reference old': 'Nadpis' }, auto: false }]
   });
   const parsed = StorageManager.parseProjectJson(json);
   assert.deepStrictEqual(parsed.warnings, []);
+  assert.deepStrictEqual(parsed.skippedRows, [{ rowNumber: 4, row: { 'Reference old': 'Nadpis' }, auto: false }], 'Přeskočené řádky jsou součástí projektu');
+  const broken = StorageManager.parseProjectJson(JSON.stringify({ ...JSON.parse(json), skippedRows: [{ rowNumber: 'x' }] }));
+  assert.deepStrictEqual(broken.skippedRows, []);
+  assert.deepStrictEqual(broken.warnings.map(w => w.code), ['INVALID_SETTINGS']);
   assert.strictEqual(JSON.parse(json).version, StorageManager.PROJECT_VERSION);
 });
 

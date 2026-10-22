@@ -17,6 +17,8 @@
     headers: [],
     rows: [],
     rowNumbers: [], // Excel row number of every data row
+    skippedRows: [], // rows excluded from processing: [{ rowNumber, row, auto }] (auto = empty row)
+    previewLimit: 10, // rows shown in the Step 1 preview
     mappings: {
       refOldCol: '',
       refNewCol: '',
@@ -84,6 +86,7 @@
     previewTableHead: document.getElementById('previewTableHead'),
     previewTableBody: document.getElementById('previewTableBody'),
     previewRowsCount: document.getElementById('previewRowsCount'),
+    previewShowMoreBtn: document.getElementById('previewShowMoreBtn'),
 
     // Step 2 Controls
     kpiTotalRows: document.getElementById('kpiTotalRows'),
@@ -459,6 +462,11 @@
       loadSheet(elements.sheetSelect.value);
     });
 
+    elements.previewShowMoreBtn.addEventListener('click', function () {
+      state.previewLimit = (state.previewLimit || PREVIEW_INITIAL_ROWS) + PREVIEW_MORE_ROWS;
+      renderDataPreview();
+    });
+
     // Re-read the sheet when the user says the first row is (not) a header
     elements.hasHeaderRowCheckbox.addEventListener('change', function () {
       if (state.importSource && state.activeSheet) {
@@ -656,10 +664,19 @@
     elements.sheetSelect.value = sheetName;
     state.headers = table.headers;
     state.columnLetters = table.columnLetters;
-    state.rowNumbers = table.rowNumbers;
-    state.rows = table.rows;
+    state.translations = {};
+    state.rows = [];
+    state.skippedRows = [];
+    state.previewLimit = PREVIEW_INITIAL_ROWS;
+    applyRowSelection(table.rows.map(function (row, idx) {
+      const empty = isEmptyRow(row);
+      return { rowNumber: table.rowNumbers[idx], row: row, skipped: empty, auto: empty };
+    }));
     resetWorkspaceForNewTable();
     selectDefaultLanguageColumns();
+    if (state.skippedRows.length > 0) {
+      showToast(t('toastEmptyRowsSkipped', { COUNT: state.skippedRows.length }), 'info');
+    }
 
     renderColumnMappingControls();
     renderDataPreview();
@@ -682,6 +699,8 @@
     state.rows = SampleGenerator.getSampleData();
     state.headers = SampleGenerator.getSampleHeaders();
     state.rowNumbers = state.rows.map(function (r, idx) { return idx + 2; });
+    state.skippedRows = [];
+    state.previewLimit = PREVIEW_INITIAL_ROWS;
     state.columnLetters = {};
     state.sheetNames = ['Data'];
     state.activeSheet = 'Data';
@@ -722,36 +741,117 @@
   }
 
   /**
-   * Step 1: Render interactive data preview table
+   * Step 1: Data preview. Every row can be marked as skipped (headings, notes, …); rows that
+   * are completely empty are skipped automatically. Skipped rows are not processed, but the full
+   * workbook keeps them unchanged at their original place.
    */
+  const PREVIEW_INITIAL_ROWS = 10;
+  const PREVIEW_MORE_ROWS = 20;
+
+  function isEmptyRow(row) {
+    return Object.keys(row).every(function (k) {
+      const v = row[k];
+      return v === '' || v === null || v === undefined || (typeof v === 'string' && !v.trim());
+    });
+  }
+
+  // All rows of the sheet in their original order: [{ rowNumber, row, skipped, auto }]
+  function allTableEntries() {
+    const entries = state.rows.map(function (row, idx) {
+      return { rowNumber: rowNumberOf(idx), row: row, skipped: false, auto: false };
+    });
+    (state.skippedRows || []).forEach(function (s) {
+      entries.push({ rowNumber: s.rowNumber, row: s.row, skipped: true, auto: !!s.auto });
+    });
+    return entries.sort(function (a, b) { return a.rowNumber - b.rowNumber; });
+  }
+
+  /**
+   * Splits the sheet into processed rows and skipped rows. Translation work is kept by row
+   * number, so (un)skipping rows later never moves texts to other rows.
+   */
+  function applyRowSelection(entries) {
+    const workByRow = {};
+    Object.keys(state.translations || {}).forEach(function (col) {
+      workByRow[col] = {};
+      (state.translations[col] || []).forEach(function (stub, idx) {
+        if (stub) workByRow[col][rowNumberOf(idx)] = stub;
+      });
+    });
+
+    const active = entries.filter(function (e) { return !e.skipped; });
+    state.rows = active.map(function (e) { return e.row; });
+    state.rowNumbers = active.map(function (e) { return e.rowNumber; });
+    state.skippedRows = entries.filter(function (e) { return e.skipped; }).map(function (e) {
+      return { rowNumber: e.rowNumber, row: e.row, auto: !!e.auto };
+    });
+
+    Object.keys(workByRow).forEach(function (col) {
+      state.translations[col] = state.rowNumbers.map(function (n) { return workByRow[col][n] || null; });
+    });
+  }
+
+  function setRowSkipped(rowNumber, skipped) {
+    const entries = allTableEntries();
+    const entry = entries.find(function (e) { return e.rowNumber === rowNumber; });
+    if (!entry || entry.auto) return;
+    entry.skipped = skipped;
+    applyRowSelection(entries);
+    renderDataPreview();
+    persistState(300);
+  }
+
   function renderDataPreview() {
     if (!elements.dataPreviewContainer) return;
-    if (!state.rows || state.rows.length === 0 || !state.headers || state.headers.length === 0) {
+    const entries = allTableEntries();
+    if (entries.length === 0 || !state.headers || state.headers.length === 0) {
       elements.dataPreviewContainer.style.display = 'none';
       return;
     }
 
     elements.dataPreviewContainer.style.display = 'block';
+    const skippedCount = entries.length - state.rows.length;
     if (elements.previewRowsCount) {
-      elements.previewRowsCount.textContent = `(${state.rows.length} ${t('rowsLabel')})`;
+      elements.previewRowsCount.textContent = `(${state.rows.length} ${t('rowsLabel')}` +
+        (skippedCount > 0 ? ` · ${t('previewSkippedCount', { COUNT: skippedCount })}` : '') + ')';
     }
 
+    const esc = ComparatorEngine.escapeHtml;
     const thStyle = 'padding:0.5rem 0.75rem; font-size:0.8rem; background:var(--bg-tertiary); border:1px solid var(--border-color);';
-    elements.previewTableHead.innerHTML = '<tr>' + `<th style="${thStyle}">${ComparatorEngine.escapeHtml(t('rowLabel'))}</th>` +
+    elements.previewTableHead.innerHTML = '<tr>' +
+      `<th style="${thStyle}" title="${esc(t('previewSkipTitle'))}">${esc(t('previewSkipCol'))}</th>` +
+      `<th style="${thStyle}">${esc(t('rowLabel'))}</th>` +
       state.headers.map(function (h) {
-        return `<th style="${thStyle}">${ComparatorEngine.escapeHtml(columnDisplayName(h))}</th>`;
+        return `<th style="${thStyle}">${esc(columnDisplayName(h))}</th>`;
       }).join('') + '</tr>';
 
-    // Sample rows (first 4); whitespace is collapsed so long single-line cells stay readable
+    // Whitespace is collapsed so long single-line cells stay readable
     const tdStyle = 'padding:0.45rem 0.75rem; font-size:0.8rem; border:1px solid var(--border-color); color:var(--text-secondary); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
-    elements.previewTableBody.innerHTML = state.rows.slice(0, 4).map(function (row, idx) {
-      return '<tr>' + `<td style="${tdStyle} font-family:var(--font-mono);">${rowNumberOf(idx)}</td>` + state.headers.map(function (h) {
-        let val = row[h] !== undefined ? String(row[h]).replace(/\s+/g, ' ').trim() : '';
+    const limit = state.previewLimit || PREVIEW_INITIAL_ROWS;
+    elements.previewTableBody.innerHTML = entries.slice(0, limit).map(function (e) {
+      const cells = state.headers.map(function (h) {
+        let val = e.row[h] !== undefined ? String(e.row[h]).replace(/\s+/g, ' ').trim() : '';
         const full = val;
         if (val.length > 60) val = val.substring(0, 57) + '...';
-        return `<td style="${tdStyle}" title="${ComparatorEngine.escapeHtml(full.slice(0, 500))}">${ComparatorEngine.escapeHtml(val)}</td>`;
-      }).join('') + '</tr>';
+        return `<td style="${tdStyle}" title="${esc(full.slice(0, 500))}">${esc(val)}</td>`;
+      }).join('');
+      const skipTitle = e.auto ? t('previewEmptyRow') : t('previewSkipTitle');
+      return `<tr class="preview-row${e.skipped ? ' preview-row-skipped' : ''}" data-row="${e.rowNumber}">` +
+        `<td style="${tdStyle} text-align:center;"><input type="checkbox" class="preview-skip-cb" data-row="${e.rowNumber}"` +
+        `${e.skipped ? ' checked' : ''}${e.auto ? ' disabled' : ''} title="${esc(skipTitle)}" aria-label="${esc(t('previewSkipCol'))} ${e.rowNumber}"></td>` +
+        `<td style="${tdStyle} font-family:var(--font-mono);">${e.rowNumber}${e.auto ? ` <span class="preview-empty-badge">${esc(t('previewEmptyRow'))}</span>` : ''}</td>` +
+        cells + '</tr>';
     }).join('');
+
+    elements.previewTableBody.querySelectorAll('.preview-skip-cb').forEach(function (cb) {
+      cb.addEventListener('change', function () {
+        setRowSkipped(parseInt(cb.getAttribute('data-row'), 10), cb.checked);
+      });
+    });
+
+    const remaining = entries.length - limit;
+    elements.previewShowMoreBtn.style.display = remaining > 0 ? 'inline-flex' : 'none';
+    elements.previewShowMoreBtn.textContent = t('previewShowMore', { COUNT: Math.min(remaining, PREVIEW_MORE_ROWS), TOTAL: remaining });
   }
 
   function downloadSampleExcelFile() {
@@ -2081,6 +2181,7 @@
       exportType: exportType,
       langCol: langCol,
       contextCols: state.partialContextCols || [state.mappings.refOldCol, state.mappings.refNewCol],
+      skippedRows: state.skippedRows,
       uiLang: I18n.getLanguage()
     });
 
@@ -2299,6 +2400,8 @@
     state.rowNumbers = Array.isArray(data.rowNumbers) && data.rowNumbers.length === state.rows.length
       ? data.rowNumbers
       : state.rows.map(function (r, idx) { return idx + 2; });
+    state.skippedRows = Array.isArray(data.skippedRows) ? data.skippedRows : [];
+    state.previewLimit = PREVIEW_INITIAL_ROWS;
     const mappings = data.mappings || {};
     state.mappings = {
       refOldCol: mappings.refOldCol || '',

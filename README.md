@@ -28,6 +28,7 @@ Offline webová aplikace pro správu jazykových verzí: porovnání **staré a 
 - U jazyka zadáte jeho **název** (výchozí je název sloupce bez čísla verze, např. „CS 2024“ → „CS“, u sloupce bez záhlaví „Sloupec C“).
 - Pokud tabulka už obsahuje **sloupec s novou verzí jazyka** (třeba téměř prázdný), vyberete ho; jeho vyplněné buňky se převezmou jako rozpracovaný text ke kontrole. Jinak se při exportu vytvoří nový sloupec (název lze upravit). Pokud se referenční sloupce liší číslem verze (např. `EN 2024` / `EN 2026`) a v tabulce je odpovídající sloupec jazyka (`CS 2026`), spáruje se automaticky.
 - Odstavce nemají nadpisy – identifikuje je **číslo řádku v Excelu**.
+- V **náhledu řádků** lze zaškrtnutím „Přeskočit“ vyřadit řádky, které se nemají zpracovat (nadpisy, poznámky…); úplně prázdné řádky se přeskočí automaticky. Přeskočené řádky se nepřekládají a nejsou v nové verzi, dokumentu ani shrnutí, ale kompletní sešit je zachová beze změny na původním místě. Výběr se ukládá do projektu a změna výběru nepřesune rozpracované texty k jiným řádkům.
 
 ### Krok 2: Změny reference
 - Statistika (beze změny, upraveno, nově přidáno, zrušeno) a tabulka referenčního textu se zvýrazněnými změnami.
@@ -69,8 +70,8 @@ Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se 
 npm test
 ```
 
-- **Jádro a adaptéry (35 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty, Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér, úplnost a obecnost lokalizace.
-- **GUI v jsdom (37 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
+- **Jádro a adaptéry (36 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty, Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér, úplnost a obecnost lokalizace.
+- **GUI v jsdom (40 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
 
 V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlížeči.
 

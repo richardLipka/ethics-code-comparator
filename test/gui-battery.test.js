@@ -86,6 +86,10 @@ function openCzechStudio(window) {
   csTab.click();
 }
 
+function SampleData() {
+  return require('../js/core/sample-generator').getSampleData();
+}
+
 function typeInto(window, textarea, text) {
   textarea.value = text;
   textarea.dispatchEvent(new window.Event('input'));
@@ -643,17 +647,135 @@ runTest('Excel: částečný sešit pro vybraný jazyk s volitelnými referenčn
 });
 
 // Náhled dat
-runTest('Náhled dat: čísla řádků a sloupce v pořadí souboru', () => {
+runTest('Náhled dat: sloupec Přeskočit, čísla řádků, sloupce v pořadí souboru a postupné zobrazení dalších řádků', () => {
   const { document } = createDomEnvironment();
   const container = document.getElementById('dataPreviewContainer');
   assert.strictEqual(container.style.display, 'none');
   document.getElementById('loadSampleBtn').click();
   assert.strictEqual(container.style.display, 'block');
   const head = Array.from(document.querySelectorAll('#previewTableHead th')).map(th => th.textContent);
-  assert.deepStrictEqual(head.slice(0, 3), ['Řádek', 'Artikel-Nr.', 'Bereich']);
+  assert.deepStrictEqual(head.slice(0, 4), ['Přeskočit', 'Řádek', 'Artikel-Nr.', 'Bereich']);
   const firstRow = document.querySelectorAll('#previewTableBody tr')[0].querySelectorAll('td');
-  assert.strictEqual(firstRow[0].textContent, '2');
-  assert.strictEqual(document.querySelectorAll('#previewTableBody tr').length, 4);
+  assert.ok(firstRow[0].querySelector('.preview-skip-cb') && !firstRow[0].querySelector('.preview-skip-cb').checked);
+  assert.strictEqual(firstRow[1].textContent, '2');
+  assert.strictEqual(document.querySelectorAll('#previewTableBody tr').length, 10, 'Na začátku se ukáže 10 řádků');
+
+  const more = document.getElementById('previewShowMoreBtn');
+  assert.strictEqual(more.textContent, 'Zobrazit dalších 5 řádků (zbývá 5)');
+  more.click();
+  assert.strictEqual(document.querySelectorAll('#previewTableBody tr').length, 15);
+  assert.strictEqual(more.style.display, 'none');
+});
+
+runTest('Přeskočení řádků: řádek se nezpracuje, ale v kompletním sešitu zůstane beze změny', async () => {
+  const { window, document } = createDomEnvironment();
+  const XLSX = window.XLSX;
+  document.getElementById('loadSampleBtn').click();
+
+  // Řádek 4 (Art. 03, upravený) uživatel přeskočí
+  const cb = document.querySelector('.preview-skip-cb[data-row="4"]');
+  cb.checked = true;
+  cb.dispatchEvent(new window.Event('change'));
+  const st = window.__app.state;
+  assert.strictEqual(st.rows.length, 14);
+  assert.deepStrictEqual(plain(st.skippedRows.map(r => r.rowNumber)), [4]);
+  assert.ok(document.querySelector('#previewTableBody tr[data-row="4"]').classList.contains('preview-row-skipped'));
+  assert.ok(document.getElementById('previewRowsCount').textContent.includes('14 řádků · 1 přeskočeno'));
+
+  document.getElementById('confirmMappingBtn').click();
+  assert.strictEqual(document.getElementById('kpiTotalRows').textContent, '14', 'Statistika bez přeskočeného řádku');
+  assert.strictEqual(document.getElementById('kpiModified').textContent, '5');
+  document.getElementById('goToTranslationBtn').click();
+  const labels = Array.from(document.querySelectorAll('#articlesContainer .article-id')).map(e => e.textContent);
+  assert.ok(!labels.includes('Řádek 4') && labels.includes('Řádek 5'), 'Přeskočený řádek není v překladu');
+
+  document.getElementById('goToExportBtn').click();
+  document.getElementById('downloadComprehensiveBtn').click();
+  const comp = await lastWorkbook(window);
+  const rows = XLSX.utils.sheet_to_json(comp.wb.Sheets.Srovnani, { defval: '' });
+  assert.strictEqual(rows.length, 15, 'Kompletní sešit má všechny řádky');
+  assert.strictEqual(rows[2]['Artikel-Nr.'], 'Art. 03', 'Přeskočený řádek je na svém místě');
+  assert.strictEqual(rows[2]['CS 2024'], SampleData()[2]['CS 2024'], 'a beze změny');
+  assert.strictEqual(rows[2]['CS 2026'], '', 'Nová verze přeskočeného řádku zůstane prázdná');
+  assert.strictEqual(rows[3]['CS 2026'], '', 'Další řádek je na správném místě');
+  const status = XLSX.utils.sheet_to_json(comp.wb.Sheets.Stav_prekladu, { defval: '' });
+  assert.deepStrictEqual([status[2]['Řádek'], status[2]['Změna reference'], status[2].CS], [4, 'Přeskočeno', 'Přeskočeno']);
+
+  document.getElementById('downloadCleanBtn').click();
+  const clean = XLSX.utils.sheet_to_json((await lastWorkbook(window)).wb.Sheets.Nova_verze, { defval: '' });
+  assert.ok(!clean.some(r => r['Artikel-Nr.'] === 'Art. 03'), 'Nová verze přeskočený řádek neobsahuje');
+
+  window.__app.setStep(4);
+  document.getElementById('downloadPartialBtn').click();
+  const partial = XLSX.utils.sheet_to_json((await lastWorkbook(window)).wb.Sheets.EN, { defval: '' });
+  assert.strictEqual(partial.length, 14);
+});
+
+runTest('Přeskočení řádků: změna výběru později nepřesune rozpracované texty k jiným řádkům', () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  typeInto(window, document.getElementById('article-card-3').querySelector('textarea.target-textarea'), 'Text řádku 5');
+
+  document.getElementById('stepNav1').click();
+  const cb = document.querySelector('.preview-skip-cb[data-row="3"]');
+  cb.checked = true;
+  cb.dispatchEvent(new window.Event('change'));
+  document.getElementById('stepNav3').click();
+  const card = Array.from(document.querySelectorAll('#articlesContainer .article-card'))
+    .find(c => c.querySelector('.article-id').textContent === 'Řádek 5');
+  assert.strictEqual(card.querySelector('textarea').value, 'Text řádku 5', 'Text zůstal u řádku 5');
+
+  // Zrušení přeskočení vrátí řádek 3 (s výchozím stavem) a text zůstane u řádku 5
+  document.getElementById('stepNav1').click();
+  const cb2 = document.querySelector('.preview-skip-cb[data-row="3"]');
+  cb2.checked = false;
+  cb2.dispatchEvent(new window.Event('change'));
+  document.getElementById('stepNav3').click();
+  assert.strictEqual(window.__app.state.rows.length, 15);
+  assert.strictEqual(document.getElementById('article-card-3').querySelector('.article-id').textContent, 'Řádek 5');
+  assert.strictEqual(document.getElementById('article-card-3').querySelector('textarea').value, 'Text řádku 5');
+  assert.strictEqual(window.__app.state.translations['CS 2024'][1].targetNew, window.__app.state.rows[1]['CS 2024'], 'Vrácený nezměněný řádek má výchozí převzatý text');
+});
+
+runTest('Prázdné řádky se přeskočí automaticky a nelze je zapnout; projekt si přeskočené řádky pamatuje', async () => {
+  const { window, document } = createDomEnvironment();
+  window.__app.processUploadedFile(workbookFile(window, {
+    Data: [
+      ['EN old', 'EN new', 'CZ'],
+      ['First paragraph text.', 'First paragraph text, new.', 'Text prvního odstavce.'],
+      ['   ', '', ' '],
+      ['Second paragraph text.', 'Second paragraph text.', 'Text druhého odstavce.'],
+      ['NOTES – not for translation', '', '']
+    ]
+  }, 'texty.xlsx'));
+  await sleep(100);
+  const st = window.__app.state;
+  assert.deepStrictEqual(plain(st.rowNumbers), [2, 4, 5]);
+  assert.deepStrictEqual(plain(st.skippedRows.map(r => [r.rowNumber, r.auto])), [[3, true]]);
+  assert.ok(toastTexts(document).some(t => t.includes('Prázdné řádky (1) byly automaticky přeskočeny')));
+  const emptyCb = document.querySelector('.preview-skip-cb[data-row="3"]');
+  assert.ok(emptyCb.checked && emptyCb.disabled, 'Prázdný řádek je přeskočen a nelze ho zapnout');
+  assert.ok(document.querySelector('#previewTableBody tr[data-row="3"]').textContent.includes('prázdný'));
+
+  // Řádek s poznámkou přeskočí uživatel
+  const notesCb = document.querySelector('.preview-skip-cb[data-row="5"]');
+  notesCb.checked = true;
+  notesCb.dispatchEvent(new window.Event('change'));
+  assert.deepStrictEqual(plain(st.rowNumbers), [2, 4]);
+
+  const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.onchange(); };
+  set('refOldSelect', 'EN old');
+  set('refNewSelect', 'EN new');
+  document.getElementById('saveProjectBtn').click();
+  const json = await readBlobText(window, window.__downloads.pop().blob);
+
+  const env2 = createDomEnvironment();
+  env2.window.__app.loadProjectFile(new env2.window.File([json], 'texty_projekt.json'));
+  await sleep(50);
+  assert.strictEqual(env2.window.__lastAlert, undefined, String(env2.window.__lastAlert));
+  assert.deepStrictEqual(plain(env2.window.__app.state.skippedRows.map(r => [r.rowNumber, r.auto])), [[3, true], [5, false]]);
+  env2.document.getElementById('stepNav1').click();
+  assert.ok(env2.document.querySelector('.preview-skip-cb[data-row="5"]').checked, 'Po načtení projektu je řádek stále přeskočen');
 });
 
 runTest('Matice jazyků a hromadné schválení nezměněných', () => {
@@ -1019,7 +1141,7 @@ runTest('CSV: UTF-8 diakritika, odstranění bílých znaků na okrajích buněk
   assert.strictEqual(st.rows[0]['Ref new'], 'Größe neu');
   assert.ok(st.rows[0]['Čeština'].startsWith('Velmi dlouhý text') && st.rows[0]['Čeština'].endsWith('řádku.'), 'Bílé znaky na začátku a konci odstraněny');
   assert.deepStrictEqual(plain(st.translations), {});
-  const previewCell = document.querySelectorAll('#previewTableBody tr')[0].querySelectorAll('td')[3];
+  const previewCell = document.querySelectorAll('#previewTableBody tr')[0].querySelectorAll('td')[4];
   assert.ok(previewCell.textContent.startsWith('Velmi dlouhý text'), 'Náhled neukazuje prázdnou buňku');
 });
 

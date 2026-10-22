@@ -67,6 +67,8 @@
       headers: state.headers,
       rows: state.rows,
       rowNumbers: state.rowNumbers,
+      // Rows excluded from processing; kept so the full workbook still contains them
+      skippedRows: state.skippedRows || [],
       mappings: state.mappings, // { refOldCol, refNewCol, targetCols, languages: { [oldCol]: { label, newCol, newColName } } }
       translations: compactTranslations(state.translations), // { [targetCol]: [ { classification, targetNew, status, isVerified, notes } ] }
       customPromptTemplate: state.customPromptTemplate,
@@ -349,6 +351,17 @@
       (!Array.isArray(result.partialContextCols) || result.partialContextCols.some(function (c) { return typeof c !== 'string'; }))) {
       result.partialContextCols = null;
       invalidSettings = true;
+    }
+    if (result.skippedRows !== undefined && result.skippedRows !== null) {
+      const validSkipped = Array.isArray(result.skippedRows) && result.skippedRows.every(function (e) {
+        return isPlainObject(e) && typeof e.rowNumber === 'number' && isPlainObject(e.row);
+      });
+      if (!validSkipped) {
+        result.skippedRows = [];
+        invalidSettings = true;
+      }
+    } else {
+      result.skippedRows = [];
     }
     if (invalidSettings) warnings.push({ code: 'INVALID_SETTINGS', params: {} });
 

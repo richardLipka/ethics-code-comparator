@@ -1539,3 +1539,26 @@ mark.search-highlight {
   font-weight: 500;
   font-size: 0.8rem;
 }
+
+/* Step 1 preview: rows marked as skipped */
+.preview-row-skipped td {
+  opacity: 0.55;
+}
+
+.preview-row-skipped td:nth-child(n+3) {
+  text-decoration: line-through;
+}
+
+.preview-skip-cb {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent-primary);
+  cursor: pointer;
+}
+
+.preview-empty-badge {
+  font-family: var(--font-sans, inherit);
+  font-size: 0.7rem;
+  font-style: italic;
+  color: var(--text-muted);
+}

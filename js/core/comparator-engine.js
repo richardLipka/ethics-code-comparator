@@ -530,7 +530,8 @@
    */
   function resolveStubs(rows, translations, targetCol, mappings) {
     const existing = translations && translations[targetCol];
-    if (Array.isArray(existing) && existing.length === rows.length) {
+    if (Array.isArray(existing) && existing.length === rows.length &&
+      existing.every(function (s) { return s && s.targetCol !== undefined; })) {
       return existing;
     }
     return rehydrateStubs(rows, existing, targetCol, mappings.refOldCol, mappings.refNewCol,
@@ -552,11 +553,11 @@
       ? { row: 'Row', change: 'Reference change', status: 'Status',
           verified: 'Verified', review: 'Awaiting review', missing: 'Translation missing', removed: 'Removed in new version',
           UNCHANGED: 'Unchanged', MODIFIED: 'Modified', ADDED: 'Added', REMOVED: 'Removed', EMPTY: 'Empty',
-          comprehensive: 'Comparison', clean: 'New_version', statusSheet: 'Translation_Status' }
+          skipped: 'Skipped', comprehensive: 'Comparison', clean: 'New_version', statusSheet: 'Translation_Status' }
       : { row: 'Řádek', change: 'Změna reference', status: 'Stav',
           verified: 'Ověřeno', review: 'Čeká na kontrolu', missing: 'Chybí překlad', removed: 'Zrušeno v nové verzi',
           UNCHANGED: 'Beze změny', MODIFIED: 'Upraveno', ADDED: 'Přidáno', REMOVED: 'Odstraněno', EMPTY: 'Prázdné',
-          comprehensive: 'Srovnani', clean: 'Nova_verze', statusSheet: 'Stav_prekladu' };
+          skipped: 'Přeskočeno', comprehensive: 'Srovnani', clean: 'Nova_verze', statusSheet: 'Stav_prekladu' };
   }
 
   /**
@@ -646,7 +647,7 @@
       if (targetCols.indexOf(h) !== -1 && !infos[h].newCol) compHeaders.push(newColNames[h]);
     });
 
-    const comprehensiveRows = rawRows.map(function (row, idx) {
+    function processedRow(row, idx) {
       const newRow = {};
       headers.forEach(function (h) {
         newRow[h] = existingNewCols[h] ? translatedText(existingNewCols[h], idx) : cellValue(row[h]);
@@ -655,6 +656,21 @@
         }
       });
       return newRow;
+    }
+
+    // Rows skipped by the user stay in the full workbook unchanged (new columns left empty)
+    function skippedRow(row) {
+      const newRow = {};
+      headers.forEach(function (h) {
+        newRow[h] = cellValue(row[h]);
+        if (targetCols.indexOf(h) !== -1 && !infos[h].newCol) newRow[newColNames[h]] = '';
+      });
+      return newRow;
+    }
+
+    const order = exportRowOrder(rawRows, options.rowNumbers, options.skippedRows);
+    const comprehensiveRows = order.map(function (entry) {
+      return entry.skipped ? skippedRow(entry.row) : processedRow(rawRows[entry.idx], entry.idx);
     });
 
     return {
@@ -662,8 +678,27 @@
       headers: compHeaders,
       data: comprehensiveRows,
       newColNames: newColNames,
-      stubsByCol: stubsByCol
+      stubsByCol: stubsByCol,
+      order: order
     };
+  }
+
+  /**
+   * Processed rows and skipped rows ([{ rowNumber, row }]) in the order of the original sheet.
+   * Returns [{ rowNumber, idx }] for processed rows and [{ rowNumber, row, skipped: true }].
+   */
+  function exportRowOrder(rows, rowNumbers, skippedRows) {
+    const entries = rows.map(function (row, idx) {
+      return { rowNumber: rowNumberOf(rowNumbers, idx), idx: idx };
+    });
+    (Array.isArray(skippedRows) ? skippedRows : []).forEach(function (s) {
+      if (s && s.row) entries.push({ rowNumber: s.rowNumber, row: s.row, skipped: true });
+    });
+    // Stable sort by row number (processed rows keep their order for equal numbers)
+    return entries
+      .map(function (e, i) { return { e: e, i: i }; })
+      .sort(function (a, b) { return (a.e.rowNumber - b.e.rowNumber) || (a.i - b.i); })
+      .map(function (x) { return x.e; });
   }
 
   /**
@@ -678,13 +713,20 @@
     const taken = [labels.row, labels.change];
     const colTitles = cols.map(function (col) { return uniqueColName(getLanguageInfo(mappings, col).label, taken); });
 
-    const data = rows.map(function (row, idx) {
-      const classification = classifyRow(row[mappings.refOldCol], row[mappings.refNewCol]);
+    const order = exportData.order || exportRowOrder(rows, options.rowNumbers, null);
+    const data = order.map(function (entry) {
       const out = {};
-      out[labels.row] = rowNumberOf(options.rowNumbers, idx);
+      out[labels.row] = entry.rowNumber;
+      if (entry.skipped) {
+        out[labels.change] = labels.skipped;
+        cols.forEach(function (col, k) { out[colTitles[k]] = labels.skipped; });
+        return out;
+      }
+      const row = rows[entry.idx];
+      const classification = classifyRow(row[mappings.refOldCol], row[mappings.refNewCol]);
       out[labels.change] = labels[classification] || classification;
       cols.forEach(function (col, k) {
-        out[colTitles[k]] = labels[getStubState(exportData.stubsByCol[col][idx])];
+        out[colTitles[k]] = labels[getStubState(exportData.stubsByCol[col][entry.idx])];
       });
       return out;
     });
