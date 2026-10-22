@@ -1497,6 +1497,9 @@
             <button class="btn btn-sm btn-primary copy-prompt-btn" data-index="${idx}">
               ${t('copyPromptBtn')}
             </button>
+            <button class="btn btn-sm btn-outline copy-verify-prompt-btn" data-index="${idx}" title="${t('copyVerifyPromptTitle')}">
+              ${t('copyVerifyPromptBtn')}
+            </button>
             ${classification === 'MODIFIED' ? `<button class="btn btn-sm btn-outline prefill-old-btn" data-index="${idx}">${t('prefillOldBtn')}</button>` : ''}
             ${classification === 'ADDED' ? `<button class="btn btn-sm btn-outline prefill-ref-btn" data-index="${idx}">${t('prefillRefBtn')}</button>` : ''}
           </div>
@@ -1652,6 +1655,14 @@
       });
     });
 
+    // Copy Verification Prompt buttons
+    elements.articlesContainer.querySelectorAll('.copy-verify-prompt-btn').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const idx = parseInt(btn.getAttribute('data-index'), 10);
+        copyVerifyPromptForIndex(idx);
+      });
+    });
+
     // Prefill with the old version
     elements.articlesContainer.querySelectorAll('.prefill-old-btn').forEach(function (btn) {
       btn.addEventListener('click', function () {
@@ -1739,14 +1750,56 @@
     }
   }
 
-  function fallbackCopyText(text) {
+  function copyVerifyPromptForIndex(idx) {
+    const col = state.activeTargetCol;
+    if (!col || !state.translations[col]) return;
+    const stub = state.translations[col][idx];
+    if (!stub) return;
+
+    const currentText = (stub.targetNew !== undefined && stub.targetNew !== null) ? stub.targetNew.trim() : '';
+    if (!currentText) {
+      showToast(t('toastNoTranslationToVerify'), 'warning');
+      return;
+    }
+
+    let auxText = '';
+    let auxLangName = '';
+    if (state.auxiliaryCol && state.translations[state.auxiliaryCol]) {
+      const auxStub = state.translations[state.auxiliaryCol][idx];
+      auxText = (auxStub && auxStub.targetNew) ? auxStub.targetNew : (auxStub ? auxStub.targetOld : (state.rows[idx] ? state.rows[idx][state.auxiliaryCol] : ''));
+      auxLangName = languageLabel(state.auxiliaryCol);
+    }
+
+    const promptText = ComparatorEngine.buildVerificationPrompt({
+      promptLang: I18n.getLanguage(),
+      targetLangName: languageLabel(col),
+      refLangName: columnDisplayName(state.mappings.refNewCol),
+      auxiliaryLangName: auxLangName,
+      auxiliaryText: auxText,
+      rowId: ComparatorEngine.rowTag(state.rowNumbers, idx),
+      refNew: stub.refNew,
+      targetNew: currentText
+    });
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(promptText).then(function () {
+        showToast(t('toastVerifyPromptCopied'), 'success');
+      }).catch(function () {
+        fallbackCopyText(promptText, t('toastVerifyPromptCopied'));
+      });
+    } else {
+      fallbackCopyText(promptText, t('toastVerifyPromptCopied'));
+    }
+  }
+
+  function fallbackCopyText(text, successToast) {
     const temp = document.createElement('textarea');
     temp.value = text;
     document.body.appendChild(temp);
     temp.select();
     document.execCommand('copy');
     document.body.removeChild(temp);
-    showToast(t('toastPromptCopied'), 'success');
+    showToast(successToast || t('toastPromptCopied'), 'success');
   }
 
   /**

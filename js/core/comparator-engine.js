@@ -499,6 +499,107 @@
   }
 
   /**
+   * Generates a Copilot prompt for auditing and verifying translation fidelity and meaning equivalence.
+   *
+   * @param {Object} params
+   * @param {string} [params.promptLang='cs'] - 'cs' | 'en'
+   * @param {string} [params.targetLangName] - Name of the target language
+   * @param {string} [params.refLangName] - Name of the reference language
+   * @param {string} [params.auxiliaryLangName] - Name of the auxiliary language if available
+   * @param {string} [params.auxiliaryText] - Auxiliary reference translation text
+   * @param {string} [params.rowId] - Formatted row identifier
+   * @param {string} [params.refNew] - New reference text
+   * @param {string} [params.targetNew] - New translation text under review
+   * @param {string} [params.customTemplate] - Optional custom template
+   * @returns {string} Verification prompt
+   */
+  function buildVerificationPrompt(params) {
+    if (!params) return '';
+    const lang = params.promptLang || 'cs';
+    const targetLang = params.targetLangName || (lang === 'en' ? 'target language' : 'cílový jazyk');
+    const refLang = params.refLangName || (lang === 'en' ? 'reference' : 'reference');
+    const rowId = params.rowId || ((lang === 'en' ? 'Row ' : 'Řádek ') + (params.rowIndex !== undefined ? params.rowIndex + 2 : ''));
+    const refNew = cleanText(params.refNew);
+    const targetNew = cleanText(params.targetNew);
+    const auxText = cleanText(params.auxiliaryText);
+    const auxLang = params.auxiliaryLangName || '';
+
+    if (params.customTemplate && typeof params.customTemplate === 'string' && params.customTemplate.trim()) {
+      const values = {
+        TARGET_LANG: targetLang,
+        REF_LANG: refLang,
+        ROW_ID: rowId,
+        REF_NEW: refNew,
+        TARGET_NEW: targetNew,
+        AUX_LANG: auxLang,
+        AUX_TEXT: auxText
+      };
+      return params.customTemplate.replace(/\{([A-Z_]+)\}/g, function (all, key) {
+        return Object.prototype.hasOwnProperty.call(values, key) ? values[key] : all;
+      }).trim();
+    }
+
+    if (lang === 'en') {
+      const lines = [
+        'You are an experienced translation proofreader and language quality auditor.',
+        'TASK: Verify the semantic equivalence and accuracy of the new translation in ' + targetLang + ' against the reference text (' + refLang + ').',
+        'Paragraph: ' + rowId,
+        '',
+        '=== 1. REFERENCE TEXT (' + refLang + ') ===',
+        refNew,
+        '',
+        '=== 2. NEW TRANSLATION UNDER REVIEW (' + targetLang + ') ===',
+        targetNew
+      ];
+
+      if (auxLang && auxText) {
+        lines.push('', '=== 3. AUXILIARY REFERENCE TRANSLATION (' + auxLang + ') ===', auxText);
+      }
+
+      lines.push(
+        '',
+        '=== EVALUATION INSTRUCTIONS ===',
+        '1. Check whether the translation accurately and completely reflects the meaning of the reference text without omissions, unwanted additions or meaning distortion.',
+        '2. Verify consistent terminology, grammar, professional tone and natural phrasing in ' + targetLang + '.',
+        '3. Structure your response clearly as follows:',
+        '   - VERDICT: [ACCURATE / MINOR REVISIONS RECOMMENDED / SIGNIFICANT DISCREPANCIES]',
+        '   - DISCREPANCIES & DEFECTS: (Concise list of specific nuances missed, shifts in meaning or inaccuracies; if none, state "None")',
+        '   - SUGGESTED REVISION: (If any flaws or improvements are identified, provide the recommended complete revised paragraph)'
+      );
+      return lines.join('\n');
+    }
+
+    // Czech default
+    const lines = [
+      'Jste zkušený jazykový korektor a revizor překladů.',
+      'ÚKOL: Ověřte věcnou a významovou shodnost nového překladu v jazyce ' + targetLang + ' vůči referenčnímu textu (' + refLang + ').',
+      'Odstavec: ' + rowId,
+      '',
+      '=== 1. REFERENČNÍ TEXT (' + refLang + ') ===',
+      refNew,
+      '',
+      '=== 2. KONTROLOVANÝ NOVÝ PŘEKLAD (' + targetLang + ') ===',
+      targetNew
+    ];
+
+    if (auxLang && auxText) {
+      lines.push('', '=== 3. POMOCNÝ REFERENČNÍ PŘEKLAD (' + auxLang + ') ===', auxText);
+    }
+
+    lines.push(
+      '',
+      '=== POKYNY K VYHODNOCENÍ ===',
+      '1. Posuďte, zda kontrolovaný překlad přesně a úplně zachovává význam referenčního textu (žádné opomenuté informace, nepatřičné přídavky ani významové posuny).',
+      '2. Zkontrolujte odbornou terminologii, gramatiku, styl a přirozenost formulace v jazyce ' + targetLang + '.',
+      '3. Odpověď strukturujte přehledně do těchto bodů:',
+      '   - ZÁVĚR: [PŘEKLAD JE V POŘÁDKU / DOPORUČENY ÚPRAVY / ZÁVAŽNÉ ROZDÍLY]',
+      '   - ROZDÍLY A NEDOSTATKY: (Stručný výčet konkrétních odchylek, chybějících nuancí či nepřesností; pokud žádné nejsou, uveďte „Žádné“)',
+      '   - NÁVRH ÚPRAVY: (Pokud byly zjištěny nedostatky, uveďte doporučené opravené znění celého odstavce)'
+    );
+    return lines.join('\n');
+  }
+
+  /**
    * Returns `name`, or a suffixed variant of it, that is not yet in `taken`
    * (so a generated column never overwrites an existing column of the same name).
    */
@@ -1318,6 +1419,7 @@
     getStubState: getStubState,
     idsMatch: idsMatch,
     buildCopilotPrompt: buildCopilotPrompt,
+    buildVerificationPrompt: buildVerificationPrompt,
     buildBatchCopilotPrompt: buildBatchCopilotPrompt,
     parseBatchTranslationResponse: parseBatchTranslationResponse,
     buildChangeSummary: buildChangeSummary,

@@ -202,6 +202,56 @@ runTest('buildCopilotPrompt: anglický prompt a vlastní šablona se zástupným
   assert.ok(withAuxEn.includes('AUXILIARY TRANSLATION FOR REFERENCE (French)') && withAuxEn.includes('Nouveau texte en français.'));
 });
 
+runTest('buildVerificationPrompt: generování promptu pro ověření shodnosti a věrnosti překladu (CZ, EN, aux)', () => {
+  const czPrompt = ComparatorEngine.buildVerificationPrompt({
+    promptLang: 'cs',
+    targetLangName: 'Čeština',
+    refLangName: 'Reference',
+    rowId: '#7',
+    refNew: 'The payment must be completed within 14 days.',
+    targetNew: 'Platba musí být dokončena do 14 dnů.',
+    auxiliaryLangName: 'Polština',
+    auxiliaryText: 'Płatność musi nastąpić w ciągu 14 dni.'
+  });
+
+  assert.ok(czPrompt.includes('revizor překladů'), 'Český úvod revizora');
+  assert.ok(czPrompt.includes('Ověřte věcnou a významovou shodnost'), 'Úkol ověření shodnosti');
+  assert.ok(czPrompt.includes('=== 1. REFERENČNÍ TEXT (Reference) ==='));
+  assert.ok(czPrompt.includes('The payment must be completed within 14 days.'));
+  assert.ok(czPrompt.includes('=== 2. KONTROLOVANÝ NOVÝ PŘEKLAD (Čeština) ==='));
+  assert.ok(czPrompt.includes('Platba musí být dokončena do 14 dnů.'));
+  assert.ok(czPrompt.includes('=== 3. POMOCNÝ REFERENČNÍ PŘEKLAD (Polština) ==='));
+  assert.ok(czPrompt.includes('Płatność musi nastąpić w ciągu 14 dni.'));
+  assert.ok(czPrompt.includes('ROZDÍLY A NEDOSTATKY'), 'Požadavek na výpis rozdílů a nedostatků');
+  assert.ok(czPrompt.includes('NÁVRH ÚPRAVY'), 'Požadavek na návrh opravy');
+  assert.ok(!/etick|kodex|němč|german|2024|2026/i.test(czPrompt), 'Obecný text bez zakázaných slov');
+
+  const enPrompt = ComparatorEngine.buildVerificationPrompt({
+    promptLang: 'en',
+    targetLangName: 'Spanish',
+    refLangName: 'English',
+    rowId: 'Row 12',
+    refNew: 'Contract is valid for 1 year.',
+    targetNew: 'El contrato es válido por 1 año.'
+  });
+  assert.ok(enPrompt.includes('translation proofreader and language quality auditor'));
+  assert.ok(enPrompt.includes('Verify the semantic equivalence'));
+  assert.ok(enPrompt.includes('=== 1. REFERENCE TEXT (English) ==='));
+  assert.ok(enPrompt.includes('=== 2. NEW TRANSLATION UNDER REVIEW (Spanish) ==='));
+  assert.ok(enPrompt.includes('DISCREPANCIES & DEFECTS'));
+  assert.ok(enPrompt.includes('SUGGESTED REVISION'));
+
+  const custom = ComparatorEngine.buildVerificationPrompt({
+    targetLangName: 'CS',
+    refLangName: 'EN',
+    rowId: '#1',
+    refNew: 'Ref',
+    targetNew: 'Trg',
+    customTemplate: 'VERIFY:{TARGET_LANG}|{REF_LANG}|{ROW_ID}|{REF_NEW}|{TARGET_NEW}'
+  });
+  assert.strictEqual(custom, 'VERIFY:CS|EN|#1|Ref|Trg');
+});
+
 runTest('buildBatchCopilotPrompt: obsahuje jen změněné a nové odstavce se značkami čísel řádků a pomocným jazykem', () => {
   const g = genericTable();
   const stubs = ComparatorEngine.generateTargetStub(g.rows, 'Czech', g.mappings.refOldCol, g.mappings.refNewCol);

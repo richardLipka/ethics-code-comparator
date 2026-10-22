@@ -1253,6 +1253,52 @@ runTest('Pomocný referenční jazyk: výběr zobrazí 5. sloupec, kopírování
   assert.ok(enAuxOptions.some(o => o.value === 'CS 2024'), 'Naopak CS je nyní nabízen');
 });
 
+runTest('Ověření překladu: tlačítko zkopíruje prompt pro kontrolu věrnosti a shodnosti významu do schránky', async () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+
+  const card0 = document.getElementById('article-card-0');
+  const verifyBtn = card0.querySelector('.copy-verify-prompt-btn');
+  assert.ok(verifyBtn, 'Tlačítko ověření překladu existuje na kartě odstavce');
+  assert.ok(verifyBtn.textContent.includes('Ověřit překlad'), 'Tlačítko má český popisek pro ověření překladu');
+
+  const textarea = card0.querySelector('textarea.target-textarea');
+
+  // 1. Prázdný překlad: varovný toast
+  typeInto(window, textarea, '');
+  verifyBtn.click();
+  await sleep(10);
+  assert.ok(toastTexts(document).some(t => t.includes('Nejprve vložte') || t.includes('Please enter')), 'Toast varuje při prázdném překladu');
+
+  // 2. Vyplněný překlad: zkopírování ověřovacího promptu do schránky
+  const myTranslation = 'Schválené nové znění pro odstavec 1.';
+  typeInto(window, textarea, myTranslation);
+  verifyBtn.click();
+  await sleep(10);
+
+  assert.ok(toastTexts(document).some(t => t.includes('Prompt pro ověření překladu byl zkopírován') || t.includes('verification prompt copied')), 'Toast potvrdil zkopírování ověřovacího promptu');
+
+  const promptText = window.getLastCopiedText();
+  assert.ok(promptText.includes('Ověřte věcnou a významovou shodnost'), 'Prompt obsahuje požadavek na ověření shodnosti');
+  assert.ok(promptText.includes('=== 1. REFERENČNÍ TEXT'), 'Prompt obsahuje referenční text');
+  assert.ok(promptText.includes('=== 2. KONTROLOVANÝ NOVÝ PŘEKLAD'), 'Prompt obsahuje kontrolovaný nový překlad');
+  assert.ok(promptText.includes(myTranslation), 'Prompt obsahuje samotný text překladu');
+  assert.ok(promptText.includes('ROZDÍLY A NEDOSTATKY'), 'Prompt obsahuje požadavek na výpis rozdílů nebo nedostatků');
+  assert.ok(promptText.includes('NÁVRH ÚPRAVY'), 'Prompt obsahuje požadavek na návrh úpravy');
+
+  // 3. Přepnutí do angličtiny
+  document.getElementById('langToggleBtn').click();
+  const card0En = document.getElementById('article-card-0');
+  const verifyBtnEn = card0En.querySelector('.copy-verify-prompt-btn');
+  assert.ok(verifyBtnEn.textContent.includes('Verify translation'), 'V angličtině má tlačítko anglický text');
+  verifyBtnEn.click();
+  await sleep(10);
+  const promptEn = window.getLastCopiedText();
+  assert.ok(promptEn.includes('Verify the semantic equivalence'), 'Anglický prompt obsahuje úkol ověření');
+  assert.ok(promptEn.includes('=== 2. NEW TRANSLATION UNDER REVIEW'), 'Anglický prompt obsahuje sekci nového překladu');
+  assert.ok(promptEn.includes('DISCREPANCIES & DEFECTS'), 'Anglický prompt obsahuje sekci nedostatků');
+});
+
 // Výsledky
 runAllTests().then(() => {
   console.log('\n========================================');
