@@ -23,28 +23,46 @@ function send(res, status, text) {
 }
 
 const server = http.createServer((req, res) => {
-  let reqPath;
+  let pathname;
   try {
-    reqPath = decodeURIComponent(req.url.split('?')[0]);
+    pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
   } catch (e) {
     send(res, 400, '400 Bad Request');
     return;
   }
-  if (reqPath === '/' || reqPath === '') reqPath = '/index.html';
 
-  // Never serve anything outside the project folder
-  let fullPath = path.resolve(ROOT, '.' + path.sep + reqPath);
-  if (fullPath !== ROOT && !fullPath.startsWith(ROOT + path.sep)) {
+  // Normalize path and map root to index.html
+  let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+  if (safePath === '/' || safePath === '\\' || safePath === '' || safePath === '.') {
+    safePath = '/index.html';
+  }
+
+  let fullPath = path.join(ROOT, safePath);
+
+  // Security check: never serve anything outside project folder
+  const rel = path.relative(ROOT, fullPath);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
     send(res, 403, '403 Forbidden');
     return;
   }
 
   fs.stat(fullPath, (err, stat) => {
-    if (!err && stat.isDirectory()) {
-      fullPath = path.join(fullPath, 'index.html');
-      stat = fs.existsSync(fullPath) ? fs.statSync(fullPath) : null;
+    if (err) {
+      send(res, 404, '404 Not Found');
+      return;
     }
-    if (err || !stat || !stat.isFile()) {
+
+    if (stat.isDirectory()) {
+      fullPath = path.join(fullPath, 'index.html');
+      try {
+        stat = fs.statSync(fullPath);
+      } catch (e) {
+        send(res, 404, '404 Not Found');
+        return;
+      }
+    }
+
+    if (!stat || !stat.isFile()) {
       send(res, 404, '404 Not Found');
       return;
     }
@@ -52,7 +70,17 @@ const server = http.createServer((req, res) => {
     const ext = path.extname(fullPath).toLowerCase();
     const mime = MIME_TYPES[ext] || 'application/octet-stream';
     res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
-    fs.createReadStream(fullPath).pipe(res);
+
+    const stream = fs.createReadStream(fullPath);
+    stream.on('error', (streamErr) => {
+      console.error('File stream error:', streamErr);
+      if (!res.headersSent) {
+        send(res, 500, '500 Server Error');
+      } else {
+        res.destroy();
+      }
+    });
+    stream.pipe(res);
   });
 });
 
