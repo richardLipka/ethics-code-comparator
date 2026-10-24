@@ -684,6 +684,7 @@
       elements.sheetOptionsWrapper.style.display = isSingleDoc ? 'none' : 'flex';
       elements.sheetSelectWrapper.style.display = state.sheetNames.length > 1 ? 'block' : 'none';
       if (loadSheet(state.sheetNames[0])) {
+        setStep(1);
         showToast(t('toastFileLoaded', { NAME: file.name }), 'success');
       }
     }).catch(function (err) {
@@ -764,6 +765,7 @@
     renderColumnMappingControls();
     renderDataPreview();
     revealMapping();
+    setStep(1);
 
     showToast(t('toastSampleLoaded'), 'success');
   }
@@ -2203,7 +2205,9 @@
     if (state.mappings.refNewCol) {
       const optRef = document.createElement('option');
       optRef.value = state.mappings.refNewCol;
-      optRef.textContent = `${columnDisplayName(state.mappings.refNewCol)} (${t('pdfOptionRefNew')})`;
+      optRef.textContent = isDirectTranslationMode()
+        ? columnDisplayName(state.mappings.refNewCol)
+        : `${columnDisplayName(state.mappings.refNewCol)} (${t('pdfOptionRefNew')})`;
       select.appendChild(optRef);
     }
 
@@ -3105,7 +3109,7 @@
       state.mappings.refOldCol = elements.refOldSelect.value;
       state.mappings.refNewCol = elements.refNewSelect.value;
 
-      if (isDirectTranslationMode() && elements.newLangNameInput && elements.newLangNameInput.value.trim()) {
+      if (elements.newLangNameInput && elements.newLangNameInput.value.trim()) {
         addNewLanguage(elements.newLangNameInput.value.trim(), elements.newLangColNameInput ? elements.newLangColNameInput.value.trim() : '');
       }
 

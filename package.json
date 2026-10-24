@@ -9,9 +9,10 @@
   },
   "private": true,
   "scripts": {
-    "test": "node test/comparator.test.js && node test/gui-battery.test.js",
+    "test": "node test/comparator.test.js && node test/gui-battery.test.js && node test/e2e-workflows.test.js",
     "test:unit": "node test/comparator.test.js",
     "test:gui": "node test/gui-battery.test.js",
+    "test:e2e": "node test/e2e-workflows.test.js",
     "start": "node serve.js"
   },
   "keywords": [],
