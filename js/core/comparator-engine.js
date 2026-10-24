@@ -98,7 +98,6 @@
    * Compute word-level diff between two text strings using jsdiff.
    */
   function computeDiff(oldText, newText, options) {
-    const opts = options || {};
     const textA = oldText !== null && oldText !== undefined ? String(oldText) : '';
     const textB = newText !== null && newText !== undefined ? String(newText) : '';
 
@@ -585,6 +584,7 @@
    * @param {string} [params.auxiliaryLangName] - Name of the auxiliary language if available
    * @param {string} [params.auxiliaryText] - Auxiliary reference translation text
    * @param {string} [params.rowId] - Formatted row identifier
+   * @param {number} [params.rowIndex] - Index of the row, used when rowId is not given
    * @param {string} [params.refNew] - New reference text
    * @param {string} [params.targetNew] - New translation text under review
    * @param {string} [params.customTemplate] - Optional custom template
@@ -1360,8 +1360,10 @@
    * Matches identifiers like [Art. 04], Art. 04:, === Art. 04 ===, or JSON.
    * When an expected list is given, tags that match no expected article are not returned
    * (they are listed in `result.unmatched`), so text can never land in the wrong row.
+   * @returns {Array<{ index: number, id: string, text: string }> & { unmatched: string[], matches: Object, count: number }}
    */
   function parseBatchTranslationResponse(responseText, expectedList) {
+    /** @type {any} */
     const resultArray = [];
     const matchesMap = {};
     const unmatched = [];
@@ -1419,7 +1421,7 @@
     }
 
     // Regex pattern matching tags: [Art. 04], Art. 04:, === Art. 04 ===, ### Art. 04, etc.
-    const sectionRegex = /(?:^|\n)\s*(?:\[([^\]]+)\]|={3,}\s*\[?([^=\]\n]+)\]?\s*={3,}|#{1,4}\s*\[?([^#\n\]]+)\]?|(?:Art(?:ikel)?|Čl(?:ánek)?|Article|Row|Řádek)\s*\.?\s*(\d+[a-z]?)\s*[:\-])([^\n]*)/gi;
+    const sectionRegex = /(?:^|\n)\s*(?:\[([^\]]+)\]|={3,}\s*\[?([^=\]\n]+)\]?\s*={3,}|#{1,4}\s*\[?([^#\n\]]+)\]?|(?:Art(?:ikel)?|Čl(?:ánek)?|Article|Row|Řádek)\s*\.?\s*(\d+[a-z]?)\s*[:-])([^\n]*)/gi;
 
     let match;
     const slices = [];
@@ -1467,7 +1469,7 @@
   function cleanIdentifier(id) {
     if (!id) return '';
     return String(id)
-      .replace(/^[\[\s=]+|[\]\s=:]+$/g, '')
+      .replace(/^[[\s=]+|[\]\s=:]+$/g, '')
       .replace(/\s+/g, ' ')
       .trim();
   }

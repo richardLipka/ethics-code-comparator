@@ -34,7 +34,7 @@ const server = http.createServer((req, res) => {
   }
 
   // Normalize path and map root to index.html
-  let safePath = path.normalize(pathname).replace(/^(\.\.[\/\\])+/, '');
+  let safePath = path.normalize(pathname).replace(/^(\.\.[/\\])+/, '');
   if (safePath === '/' || safePath === '\\' || safePath === '' || safePath === '.') {
     safePath = '/index.html';
   }

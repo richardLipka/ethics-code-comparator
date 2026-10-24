@@ -1390,7 +1390,7 @@ runTest('Nově přidaný jazyk (bez původního sloupce): přidání v Kroku 1, 
   // Hromadné schválení neoznačí prázdné nepřeložené řádky u nového jazyka
   document.getElementById('approveUnchangedBtn').click();
   await sleep(20);
-  let card0After = document.getElementById('article-card-0');
+  const card0After = document.getElementById('article-card-0');
   assert.strictEqual(card0After.classList.contains('status-verified'), false, 'Nepřeložený odstavec nového jazyka se neoznačí jako schválený');
 
   const curTextarea = card0After.querySelector('textarea.target-textarea');

@@ -17,4 +17,6 @@ jobs:
       - run: npm ci
       - name: Bundled SheetJS matches the npm package
         run: cmp lib/xlsx.full.min.js node_modules/xlsx/dist/xlsx.full.min.js
+      - run: npm run lint
+      - run: npm run typecheck
       - run: npm test

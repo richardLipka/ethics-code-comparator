@@ -8,6 +8,7 @@
   } else if (typeof module === 'object' && module.exports) {
     module.exports = factory();
   } else {
+    // @ts-ignore -- replaces the browser's own StorageManager interface, which the page does not use
     root.StorageManager = factory();
   }
 }(typeof self !== 'undefined' ? self : this, function () {

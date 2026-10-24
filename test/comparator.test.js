@@ -1091,8 +1091,10 @@ runTest('Export s jedinou referencí (refOldCol = ""): kompletní, čistý i č�
   assert.deepStrictEqual(partial.headers, ['Řádek', 'Reference', 'PL', 'Stav']);
   assert.strictEqual(partial.data[0]['PL'], 'Pierwszy artykuł.');
 });
-runTest('i18n: všechny klíče z app.js a index.html existují v CS i EN; texty jsou obecné', () => {
-  const appSrc = fs.readFileSync(path.join(__dirname, '../js/app.js'), 'utf8');
+runTest('i18n: všechny klíče z js/app/*.js a index.html existují v CS i EN; texty jsou obecné', () => {
+  const appDir = path.join(__dirname, '../js/app');
+  const appSrc = fs.readdirSync(appDir).filter(f => f.endsWith('.js'))
+    .map(f => fs.readFileSync(path.join(appDir, f), 'utf8')).join('\n');
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');
   const used = new Set([...appSrc.matchAll(/\bt\('([a-zA-Z0-9]+)'/g)].map(m => m[1]));
   [...html.matchAll(/data-i18n(?:-placeholder|-title)?="([a-zA-Z0-9]+)"/g)].forEach(m => used.add(m[1]));
