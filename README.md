@@ -48,15 +48,17 @@ Offline webová aplikace pro správu jazykových verzí: porovnání **staré a 
 ### Krok 4: Export
 Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se pro dokument k tisku, shrnutí změn a částečný sešit.
 - **Kompletní sešit:** všechny původní sloupce i řádky; nová verze každého jazyka v jeho existujícím sloupci nebo v novém sloupci hned za starou verzí (existující data se nikdy nepřepíší). List `Stav_prekladu` ukazuje pro každý řádek a jazyk *Ověřeno / Čeká na kontrolu / Chybí překlad / Zrušeno*.
+- **Aktualizovat původní sešit (zachová formát)** – u tabulky načtené z `.xlsx`/`.xlsm`: nové verze se zapíšou do **kopie původního souboru**, takže zůstane formátování, vzorce, sloučené buňky, šířky sloupců, ukotvení, ostatní listy, grafy i makra. Mění se jen zapisované buňky jednoho listu: existující sloupec nové verze se přepíše na místě, jinak se nový sloupec přidá **za poslední použitý sloupec** (vložení doprostřed by vyžadovalo přepsat všechny vzorce a odkazy) a převezme vzhled a šířku staré verze jazyka. Stav kontroly se zapíše na list `Stav_prekladu` (při opakované aktualizaci se nahradí). Po obnovení stránky nebo načtení projektu aplikace požádá o původní soubor a ověří, že k projektu patří.
 - **Pouze nová verze:** odstavce platné v nové verzi, nová verze reference a všech jazyků, bez starých verzí.
 - **Částečný sešit pro jeden jazyk:** číslo řádku, zvolené další sloupce, stará a nová verze vybraného jazyka a stav – např. pro předání překladateli. **Vyplněný sešit lze načíst zpět** tlačítkem „📂 Importovat překlady ze sešitu“ (Krok 3 nebo 4): texty se spárují podle sloupce `Řádek`/`Row` a sloupce nové verze jazyka, aplikace před převzetím ukáže, kolik textů se změní (a které řádky v projektu nejsou), a převzaté texty označí jako *Čeká na kontrolu*. Prázdné buňky a zrušené odstavce se nemění. Další sloupce se vybírají ve dvou skupinách: **nové verze** (nová reference a aktuální stav překladu ostatních jazyků, i když jejich sloupec v tabulce zatím neexistuje) a **původní sloupce** tabulky. Nové verze jsou v exportu na prvním místě; výchozí výběr je stará a nová reference.
+- **Word (.docx):** u dokumentu načteného z Wordu se překlad zapíše do **kopie původního dokumentu** – každý odstavec si ponechá styl, číslování a formát prvního úseku textu; tabulky, obrázky, textová pole, záhlaví, zápatí a konce stránek zůstanou. Nepřeložené odstavce zůstanou v původním znění. U jiného zdroje se vytvoří nový dokument Wordu s hlavičkou z nastavení dokumentu.
 - **Dokument pro tisk / PDF:** nová verze vybraného jazyka jako formátovaný dokument A4. Chybějící překlad je vyznačen a neúplný dokument je označen jako **KONCEPT** – nikdy se nepoužije zastaralý text. Hlavička (organizace, název, podtitul s `{LANG}`, verze, datum, úvod, podpisy, barva) je volitelná.
 - **Shrnutí změn vybraného jazyka:** statistika, upravené, nové a zrušené odstavce (u jazyka jeho stará a nová verze a stav kontroly) – Markdown, Word nebo tisk/PDF.
 - Po exportu aplikace upozorní, kolik odstavců ještě není schváleno nebo přeloženo.
 
 ### Formáty importu a exportu (adaptéry)
 - Načítání souborů a všechny exporty jdou přes **adaptéry** – aplikace ani jádro nevolají knihovny konkrétních formátů přímo. Nový formát se přidá jedním souborem ve složce `js/io/` a jeho uvedením v `index.html`.
-- Výchozí adaptéry odpovídají dosavadnímu chování: import Excel/CSV, export tabulek do Excelu, dokument k tisku/HTML, shrnutí změn jako Markdown, Word a tisk.
+- Výchozí adaptéry: import Excel/CSV, Word a text; export tabulek do Excelu, zápis do původního sešitu, dokument k tisku/HTML a Word (.docx), shrnutí změn jako Markdown, Word a tisk.
 - Pokud je zaregistrováno víc tabulkových exportérů, Krok 4 nabídne volbu **formátu tabulek** (výchozí zůstává Excel).
 - Popis rozhraní a příklady: [docs/ADAPTERS.md](docs/ADAPTERS.md).
 
@@ -75,8 +77,8 @@ Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se 
 npm test
 ```
 
-- **Jádro a adaptéry (56 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty (překlad i ověření), Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér (CSV ve Windows-1250, data), Word importér na skutečných souborech Wordu (`test/fixtures`), import vyplněného částečného sešitu, úplnost a obecnost lokalizace.
-- **GUI v jsdom (50 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, pomocný referenční jazyk, ověření překladu, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu, import překladů ze sešitu, přístupnost (audit [axe-core](https://github.com/dequelabs/axe-core) všech kroků a dialogů, ovládání klávesnicí, fokus v dialozích).
+- **Jádro a adaptéry (61 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty (překlad i ověření), Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér (CSV ve Windows-1250, data), Word importér na skutečných souborech Wordu (`test/fixtures`), import vyplněného částečného sešitu, zápis do kopie původního sešitu a dokumentu Wordu (ověřeno na souborech vytvořených Excelem a Wordem), úplnost a obecnost lokalizace.
+- **GUI v jsdom (53 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, pomocný referenční jazyk, ověření překladu, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu, import překladů ze sešitu, přístupnost (audit [axe-core](https://github.com/dequelabs/axe-core) všech kroků a dialogů, ovládání klávesnicí, fokus v dialozích).
 - **E2E (5 testů):** `npm run test:e2e` – celé průchody Kroky 1–4 pro vícejazyčný Excel, Word, text a jednosloupcový Excel.
 - **Kontrola kódu:** `npm run lint` (ESLint) a `npm run typecheck` (typová kontrola jádra a adaptérů podle JSDoc přes TypeScript).
 - Kontrola kódu i testy běží automaticky na GitHubu při každém push a pull requestu (`.github/workflows/test.yml`).
@@ -113,10 +115,13 @@ V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlíže
 │   ├── importers.js           # Registr importérů a model tabulky
 │   ├── excel-importer.js      # Výchozí importér: Excel / OpenDocument / CSV
 │   ├── word-importer.js       # Word: .docx, .doc, .rtf
+│   ├── ooxml.js               # Balíčky Office (.docx, .xlsx): zip, odstavce Wordu
 │   ├── text-importer.js       # Text: .txt
 │   ├── exporters.js           # Registr exportérů, stahování a tisk
 │   ├── excel-exporter.js      # Výchozí export tabulek: Excel (.xlsx)
 │   ├── html-document-exporter.js  # Dokument pro tisk / HTML
+│   ├── docx-exporter.js       # Dokument Word (.docx), i do kopie původního dokumentu
+│   ├── xlsx-update-exporter.js    # Zápis do kopie původního sešitu (zachová formát)
 │   └── summary-exporters.js   # Shrnutí změn: Markdown, Word, tisk
 ├── docs/ADAPTERS.md           # Jak napsat vlastní importér / exportér
 ├── lib/                       # SheetJS a jsdiff (vlastní licence)

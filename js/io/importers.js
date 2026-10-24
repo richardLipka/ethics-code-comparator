@@ -123,7 +123,8 @@
         return row;
       }),
       rowNumbers: rowNumbers,
-      columnLetters: table.columnLetters || {}
+      columnLetters: table.columnLetters || {},
+      headerRowNumber: typeof table.headerRowNumber === 'number' ? table.headerRowNumber : null
     };
   }
 
@@ -176,7 +177,9 @@
 
   /**
    * Imports a browser File with the matching adapter.
-   * Resolves to { adapter, source }; rejects when no adapter accepts the file or parsing fails.
+   * Resolves to { adapter, source, content } (content = what was read from the file, so an
+   * exporter can later write into a copy of it); rejects when no adapter accepts the file or
+   * parsing fails.
    */
   function importFile(file) {
     const adapter = findForFile(file.name, file.type);
@@ -193,7 +196,7 @@
         err.code = 'NO_SHEETS';
         throw err;
       }
-      return { adapter: adapter, source: source };
+      return { adapter: adapter, source: source, content: content };
     });
   }
 

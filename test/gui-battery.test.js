@@ -1730,6 +1730,112 @@ runTest('Přístupnost: ovládání klávesnicí, stav tlačítek a fokus v dial
   assert.strictEqual(document.getElementById('closeSmartPasteBtn').getAttribute('aria-label'), 'Close');
 });
 
+function fixtureFile(window, name) {
+  return new window.File([fs.readFileSync(path.join(__dirname, 'fixtures', name))], name);
+}
+
+function chooseFile(window, input, file) {
+  Object.defineProperty(input, 'files', { value: [file], configurable: true });
+  input.dispatchEvent(new window.Event('change'));
+}
+
+async function loadRichWorkbook(window) {
+  const document = window.document;
+  await window.__app.processUploadedFile(fixtureFile(window, 'excel-rich.xlsx'));
+  setSelect(window, document.getElementById('refOldSelect'), 'DE 2024');
+  setSelect(window, document.getElementById('refNewSelect'), 'DE 2026');
+  // The short sample texts are not pre-selected as a language; tick it like a user would
+  const cb = langRow(document, 'CS 2024').querySelector('.lang-use-cb');
+  if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new window.Event('change')); }
+  assert.deepStrictEqual(plain(window.__app.state.mappings.targetCols), ['CS 2024']);
+  document.getElementById('confirmMappingBtn').click();
+  window.__app.setStep(3);
+  typeInto(window, document.getElementById('article-card-0').querySelector('textarea.target-textarea'), 'Nový text jedna.');
+  window.__app.setStep(4);
+}
+
+runTest('Export do původního sešitu: tlačítko v Kroku 4 zapíše novou verzi do kopie nahraného souboru', async () => {
+  const { window, document } = createDomEnvironment();
+  await loadRichWorkbook(window);
+  assert.strictEqual(document.getElementById('updateOriginalWrapper').style.display, 'flex');
+
+  document.getElementById('updateOriginalBtn').click();
+  const out = await lastWorkbook(window);
+  assert.strictEqual(out.name, 'excel-rich_srovnani.xlsx');
+  assert.deepStrictEqual(plain(out.wb.SheetNames), ['Data', 'Jiný', 'Stav_prekladu']);
+  assert.strictEqual(out.wb.Sheets.Data.I1.v, 'CS 2026');
+  assert.strictEqual(out.wb.Sheets.Data.I2.v, 'Nový text jedna.');
+  assert.ok(toastTexts(document).some(t => /s formátováním původního souboru/.test(t)));
+});
+
+runTest('Export do původního sešitu po načtení projektu: aplikace požádá o původní soubor a ověří, že patří k projektu', async () => {
+  const first = createDomEnvironment();
+  await loadRichWorkbook(first.window);
+  const project = JSON.parse(first.window.StorageManager.serializeProjectJson(first.window.__app.state));
+  // A new session (page reloaded) opens the project file
+  const { window, document } = createDomEnvironment();
+  window.__app.restoreProjectFromData(window.StorageManager.parseProjectJson(project));
+  window.__app.setStep(4);
+  assert.strictEqual(window.__app.state.originalFile, null, 'Původní soubor není součástí projektu');
+
+  const input = document.getElementById('originalFileInput');
+  let opened = 0;
+  input.click = () => { opened++; };
+  document.getElementById('updateOriginalBtn').click();
+  assert.strictEqual(opened, 1, 'Otevře se výběr souboru');
+  assert.ok(toastTexts(document).some(t => /Vyberte původní soubor excel-rich\.xlsx/.test(t)));
+
+  // A different workbook is refused
+  chooseFile(window, input, workbookFile(window, { Data: [['ID', 'DE 2024', 'DE 2026', 'CS 2024'], ['A1', 'x', 'y', 'z']] }, 'jiny.xlsx'));
+  await sleep(50);
+  assert.ok(/neodpovídá projektu/.test(window.__lastAlert), 'Cizí soubor odmítnut: ' + window.__lastAlert);
+  assert.strictEqual(window.__downloads.length, 0);
+
+  document.getElementById('updateOriginalBtn').click();
+  chooseFile(window, input, fixtureFile(window, 'excel-rich.xlsx'));
+  await sleep(50);
+  const out = await lastWorkbook(window);
+  assert.strictEqual(out.wb.Sheets.Data.I2.v, 'Nový text jedna.');
+
+  // The selected file is remembered for the next export
+  document.getElementById('updateOriginalBtn').click();
+  assert.strictEqual(opened, 2, 'Podruhé se už neptá');
+  assert.ok(window.__downloads.length === 1);
+});
+
+runTest('Word export: dokument z Wordu se přeloží v kopii originálu, jiný zdroj vytvoří nový dokument', async () => {
+  const { window, document } = createDomEnvironment();
+  await window.__app.processUploadedFile(new window.File([createTestDocx(['Odstavec jedna.', 'Odstavec dva.'])], 'smlouva.docx'));
+  document.getElementById('newLangNameInput').value = 'EN';
+  document.getElementById('addNewLangBtn').click();
+  document.getElementById('confirmMappingBtn').click();
+  typeInto(window, document.getElementById('article-card-0').querySelector('textarea.target-textarea'), 'Paragraph one.');
+  window.__app.setStep(4);
+  assert.strictEqual(document.getElementById('docxOriginalHint').style.display, 'block');
+  const select = document.getElementById('pdfLangSelect');
+  setSelect(window, select, Array.from(select.options).find(o => o.textContent.trim().startsWith('EN')).value);
+
+  document.getElementById('downloadDocxBtn').click();
+  const download = window.__downloads.pop();
+  assert.strictEqual(download.name, 'smlouva_EN.docx');
+  const buffer = await readBlobBuffer(window, download.blob);
+  const source = window.WordImporter.parse(buffer, { fileName: 'x.docx' });
+  assert.deepStrictEqual(plain(window.Importers.readSheet(source, source.sheetNames[0]).rows.map(r => r.Reference)), ['Paragraph one.', 'Odstavec dva.']);
+  assert.ok(toastTexts(document).some(t => /1 odstavců bez překladu zůstalo v původním znění/.test(t)));
+
+  // Excel source: a new Word document
+  const env2 = createDomEnvironment();
+  openCzechStudio(env2.window);
+  env2.window.__app.setStep(4);
+  assert.strictEqual(env2.document.getElementById('docxOriginalHint').style.display, 'none');
+  assert.strictEqual(env2.document.getElementById('updateOriginalWrapper').style.display, 'flex', 'Ukázka je sešit .xlsx');
+  env2.document.getElementById('downloadDocxBtn').click();
+  const generated = env2.window.__downloads.pop();
+  assert.ok(/\.docx$/.test(generated.name));
+  const gsrc = env2.window.WordImporter.parse(await readBlobBuffer(env2.window, generated.blob), { fileName: 'g.docx' });
+  assert.ok(env2.window.Importers.readSheet(gsrc, gsrc.sheetNames[0]).rows.length > 5);
+});
+
 runAllTests().then(() => {
   console.log('\n========================================');
   console.log(`VÝSLEDEK BATERIE GUI TESTŮ: ${passedTests} úspěšných, ${failedTests} chyb`);

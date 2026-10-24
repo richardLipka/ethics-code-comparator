@@ -1066,6 +1066,55 @@
   }
 
   /**
+   * What to write into the original workbook to get the complete workbook without losing its
+   * formatting (see js/io/xlsx-update-exporter.js). Sheet columns are given by letter
+   * (options.columnLetters: header -> letter, as read from the original file).
+   *  - a language with an existing new-version column: its cells are overwritten
+   *  - any other language: a new column (after the last used column) styled like the language's
+   *    old-version column (the reference's new version for newly added languages)
+   *  - the status table of the complete workbook as an extra sheet
+   * Skipped rows are not touched. Returns { columns: [{ letter, header, styleFrom, cells:
+   * [{ row, value }] }], statusTable: { name, headers, rows }, unverifiedCount }.
+   */
+  function prepareWorkbookUpdate(options) {
+    const mappings = options.mappings || {};
+    const headers = options.headers || [];
+    const letters = options.columnLetters || {};
+    const letterOf = function (col) {
+      const letter = options.hasHeaderRow === false ? col : letters[col];
+      if (!letter) {
+        const err = new Error('Column "' + col + '" was not found in the original workbook.');
+        err.code = 'MISSING_COLUMN';
+        err.params = { COL: col };
+        throw err;
+      }
+      return letter;
+    };
+    const tables = prepareExportTables(Object.assign({}, options, { exportType: 'comprehensive' }));
+    const exportData = tables.exportData;
+
+    const columns = Object.keys(exportData.stubsByCol).map(function (col) {
+      const info = getLanguageInfo(mappings, col);
+      const existing = info.newCol && headers.indexOf(info.newCol) !== -1 ? info.newCol : '';
+      const stubs = exportData.stubsByCol[col];
+      return {
+        letter: existing ? letterOf(existing) : null,
+        header: exportData.newColNames[col],
+        styleFrom: letterOf(isNewLanguage(mappings, col) && headers.indexOf(col) === -1 ? mappings.refNewCol : col),
+        cells: (options.rows || []).map(function (row, idx) {
+          return { row: rowNumberOf(options.rowNumbers, idx), value: String(cellValue(stubs[idx] && stubs[idx].targetNew)) };
+        })
+      };
+    });
+    const status = tables.tables[1];
+    return {
+      columns: columns,
+      statusTable: status ? { name: status.name, headers: status.headers, rows: status.rows } : null,
+      unverifiedCount: tables.unverifiedCount
+    };
+  }
+
+  /**
    * Matches a table read back from a workbook (typically a partial workbook filled in by a
    * translator) to the translation work. Rows are identified by the row-number column ("Řádek" /
    * "Row"), a language by the column name its new version is exported under. Only non-empty
@@ -1646,6 +1695,7 @@
     prepareExportData: prepareExportData,
     prepareLanguageExportData: prepareLanguageExportData,
     prepareExportTables: prepareExportTables,
+    prepareWorkbookUpdate: prepareWorkbookUpdate,
     matchImportedTranslations: matchImportedTranslations
   };
 }));

@@ -703,7 +703,7 @@ runTest('Importers: nový adaptér lze zaregistrovat a má přednost; model tabu
     assert.strictEqual(Importers.findForFile('data.csv').id, 'test-json', 'Později registrovaný adaptér má přednost');
     const source = custom.parse('[{"key":"a","text":"Ahoj"}]');
     const table = Importers.readSheet(source, 'Strings');
-    assert.deepStrictEqual(table, { headers: ['key', 'text'], rows: [{ key: 'a', text: 'Ahoj' }], rowNumbers: [2], columnLetters: {} });
+    assert.deepStrictEqual(table, { headers: ['key', 'text'], rows: [{ key: 'a', text: 'Ahoj' }], rowNumbers: [2], columnLetters: {}, headerRowNumber: null });
     assert.throws(() => Importers.register({ id: 'bad' }), /parse/);
   } finally {
     Importers.unregister('test-json');
@@ -1253,6 +1253,155 @@ runTest('Import překladů: částečný sešit vyplněný překladatelem se sp�
   assert.strictEqual(noRow.error, 'NO_ROW_COLUMN');
   const noLang = ComparatorEngine.matchImportedTranslations({ table: { headers: ['Row', 'CS 1'], rows: [{ Row: 2, 'CS 1': 'x' }] }, rows, rowNumbers, mappings, translations });
   assert.strictEqual(noLang.error, 'NO_LANGUAGE_COLUMN', 'stará verze jazyka se nikdy nečte jako nová');
+});
+
+// ---------------------------------------------------------------------------
+// Exports into the original file (Word, Excel)
+// ---------------------------------------------------------------------------
+const Ooxml = require('../js/io/ooxml');
+const DocxExporter = require('../js/io/docx-exporter');
+const XlsxUpdateExporter = require('../js/io/xlsx-update-exporter');
+
+runTest('Ooxml: odstavce Wordu – prázdný samouzavírací odstavec, textové pole, fallback kopie a kód pole', () => {
+  const xml = '<w:body>' +
+    '<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="1"/></w:tabs></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t>Hello</w:t></w:r><w:r><w:t xml:space="preserve"> world</w:t></w:r></w:p>' +
+    '<w:p w14:paraId="1"/>' +
+    '<w:p><w:r><w:t>Second</w:t></w:r><w:r><w:drawing><mc:AlternateContent><mc:Choice><wps:txbx><w:txbxContent><w:p><w:r><w:t>Box</w:t></w:r></w:p></w:txbxContent></wps:txbx></mc:Choice>' +
+    '<mc:Fallback><w:pict><v:textbox><w:txbxContent><w:p><w:r><w:t>Box</w:t></w:r></w:p></w:txbxContent></v:textbox></w:pict></mc:Fallback></mc:AlternateContent></w:drawing></w:r><w:r><w:t> tail</w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t xml:space="preserve">Year </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>DATE</w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>2026</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>' +
+    '<w:p><w:r><w:t>Before</w:t></w:r><w:r><w:br w:type="page"/></w:r></w:p>' +
+    '</w:body>';
+  const paragraphs = Ooxml.docxParagraphs(xml);
+  assert.deepStrictEqual(paragraphs.map(p => p.text), ['Hello world', 'Second tail', 'Box', 'Year 2026', 'Before']);
+
+  const edits = [].concat(
+    Ooxml.docxTextEdits(xml, paragraphs[0], 'Ahoj\nsvěte & <x>'),
+    Ooxml.docxTextEdits(xml, paragraphs[1], 'Druhý'),
+    Ooxml.docxTextEdits(xml, paragraphs[2], 'Rámeček'),
+    Ooxml.docxTextEdits(xml, paragraphs[3], 'Rok 2026'),
+    Ooxml.docxTextEdits(xml, paragraphs[4], 'Před')
+  );
+  const out = Ooxml.applyEdits(xml, edits);
+  assert.deepStrictEqual(Ooxml.docxParagraphs(out).map(p => p.text), ['Ahoj\nsvěte & <x>', 'Druhý', 'Rámeček', 'Rok 2026', 'Před']);
+  assert.ok(out.includes('<w:rPr><w:b/></w:rPr><w:t xml:space="preserve">Ahoj</w:t><w:br/>'), 'Formát prvního běhu zůstane');
+  assert.ok(out.includes('<w:tabs><w:tab w:val="left" w:pos="1"/></w:tabs>'), 'Zarážky odstavce zůstanou');
+  assert.ok(out.includes('<w:instrText>DATE</w:instrText>'), 'Kód pole zůstane');
+  assert.ok(out.includes('<w:br w:type="page"/>'), 'Konec stránky zůstane');
+});
+
+runTest('Word export: překlad zapsaný do kopie původního dokumentu Wordu zachová styly, číslování, tabulku a pole', () => {
+  const original = fixtureBuffer('word-rich.docx');
+  const source = WordImporter.parse(original, { fileName: 'word-rich.docx' });
+  const texts = Importers.readSheet(source, source.sheetNames[0]).rows.map(r => r.Reference);
+  assert.strictEqual(texts.length, 9);
+  const model = {
+    paragraphs: texts.map((text, i) => ({ rowNumber: i + 1, text: i === 2 ? '' : 'EN ' + (i + 1) + ': ' + text, missing: i === 2 }))
+  };
+  const result = DocxExporter.updateDocument(model, original);
+  assert.strictEqual(result.replaced, 8);
+  assert.strictEqual(result.kept, 1);
+
+  const updated = WordImporter.parse(result.bytes, { fileName: 'out.docx' });
+  const out = Importers.readSheet(updated, updated.sheetNames[0]).rows.map(r => r.Reference);
+  assert.deepStrictEqual(out, texts.map((text, i) => i === 2 ? text : 'EN ' + (i + 1) + ': ' + text), 'Nepřeložený odstavec zůstane v původním znění');
+
+  const before = Ooxml.openPackage(original);
+  const after = Ooxml.openPackage(result.bytes);
+  const xml = after.getText('word/document.xml');
+  ['<w:numPr>', '<w:tbl>', '<w:pStyle', 'w:type="page"', '<w:headerReference', '<w:txbxContent>'].forEach(part => {
+    assert.ok(xml.includes(part), 'Zachováno: ' + part);
+  });
+  before.paths().filter(p => p !== 'word/document.xml').forEach(p => {
+    assert.deepStrictEqual(Buffer.from(after.get(p)), Buffer.from(before.get(p)), 'Ostatní části souboru beze změny: ' + p);
+  });
+});
+
+runTest('Word export: nový dokument (zdroj nebyl Word) s hlavičkou, konceptem a vyznačeným chybějícím překladem', () => {
+  const rows = SampleGenerator.getSampleData();
+  const mappings = SampleGenerator.getSampleDefaultMappings();
+  const model = ComparatorEngine.buildDocumentModel({
+    rows, mappings, translations: {}, targetCol: 'CS 2024', uiLang: 'cs',
+    template: { docTitle: 'Kodex', companyName: 'Firma a.s.', showSignatures: true, signDept1: 'Ředitel', signDept2: 'Compliance' }
+  });
+  const bytes = DocxExporter.export(model, {}).content;
+  const source = WordImporter.parse(bytes, { fileName: 'novy.docx' });
+  const texts = Importers.readSheet(source, source.sheetNames[0]).rows.map(r => r.Reference);
+  assert.ok(/^KONCEPT/.test(texts[0]));
+  assert.strictEqual(texts[1], 'Firma a.s.');
+  assert.strictEqual(texts[2], 'Kodex');
+  assert.ok(texts.some(t => /^\[Překlad chybí – řádek \d+\]$/.test(t)), 'Chybějící překlad je vyznačen');
+  assert.ok(texts.includes('Ředitel') && texts.includes('Compliance'));
+  const pkg = Ooxml.openPackage(bytes);
+  assert.ok(pkg.has('[Content_Types].xml') && pkg.has('word/styles.xml') && pkg.has('_rels/.rels'));
+});
+
+function richWorkbookSpec(extra) {
+  const original = fixtureBuffer('excel-rich.xlsx');
+  const source = ExcelImporter.parse(original, { fileName: 'excel-rich.xlsx' });
+  const table = Importers.readSheet(source, 'Data', { hasHeaderRow: true });
+  const mappings = Object.assign({ refOldCol: 'DE 2024', refNewCol: 'DE 2026', targetCols: ['CS 2024'],
+    languages: { 'CS 2024': { label: 'CS', newCol: '', newColName: 'CS 2026' } } }, extra && extra.mappings);
+  const translations = { 'CS 2024': ComparatorEngine.rehydrateStubs(table.rows, null, 'CS 2024', 'DE 2024', 'DE 2026', mappings.languages['CS 2024'].newCol, false) };
+  translations['CS 2024'][0].targetNew = 'Nový text jedna.\nDruhý řádek & <znaky>';
+  translations['CS 2024'][0].isVerified = true;
+  translations['CS 2024'][3].targetNew = 'Úplně nové.';
+  const spec = ComparatorEngine.prepareWorkbookUpdate({
+    rows: table.rows, headers: table.headers, rowNumbers: table.rowNumbers, mappings, translations,
+    columnLetters: table.columnLetters, hasHeaderRow: true, uiLang: 'cs'
+  });
+  return { original, table, spec };
+}
+
+runTest('Excel export do původního sešitu: nový sloupec za posledním, styl a šířka staré verze, vzorce, sloučení a ostatní listy zůstanou', () => {
+  const { original, table, spec } = richWorkbookSpec();
+  assert.strictEqual(table.headerRowNumber, 1);
+  assert.deepStrictEqual(spec.columns.map(c => [c.letter, c.header, c.styleFrom]), [[null, 'CS 2026', 'D']]);
+  const bytes = XlsxUpdateExporter.updateWorkbook(Object.assign({ original, sheetName: 'Data', headerRow: 1 }, spec));
+
+  const wb = XLSX.read(bytes, { type: 'array', cellFormula: true, cellStyles: true });
+  assert.deepStrictEqual(wb.SheetNames, ['Data', 'Jiný', 'Stav_prekladu']);
+  const ws = wb.Sheets.Data;
+  assert.strictEqual(ws.I1.v, 'CS 2026', 'Nový sloupec za posledním použitým (sloučené G:H)');
+  assert.strictEqual(ws.I2.v, 'Nový text jedna.\nDruhý řádek & <znaky>');
+  assert.strictEqual(ws.I3.v, 'Beze změny.', 'Nezměněný odstavec převzat');
+  assert.strictEqual(ws.I5.v, 'Úplně nové.');
+  assert.strictEqual(ws.I4, undefined, 'Zrušený odstavec bez textu');
+  assert.strictEqual(ws.F2.f, 'LEN(C2)', 'Vzorec zůstal');
+  assert.deepStrictEqual(ws['!merges'].map(m => XLSX.utils.encode_range(m)), ['G2:H3']);
+  assert.strictEqual(wb.Sheets['Jiný'].A1.f, 'Data!C2');
+  assert.strictEqual(ws['!cols'][8].wch, ws['!cols'][3].wch, 'Šířka jako stará verze jazyka');
+
+  const sheetXml = Ooxml.openPackage(bytes).getText('xl/worksheets/sheet1.xml');
+  const styleOf = ref => (new RegExp('<c r="' + ref + '"[^>]*\\ss="(\\d+)"').exec(sheetXml) || [])[1];
+  assert.strictEqual(styleOf('I2'), styleOf('D2'), 'Styl buněk jako stará verze');
+  assert.strictEqual(styleOf('I1'), styleOf('D1'), 'Styl záhlaví jako stará verze');
+  const status = XLSX.utils.sheet_to_json(wb.Sheets.Stav_prekladu, { defval: '' });
+  assert.deepStrictEqual(status.map(r => [r['Řádek'], r.CS]), [[2, 'Ověřeno'], [3, 'Ověřeno'], [4, 'Zrušeno v nové verzi'], [5, 'Čeká na kontrolu']]);
+
+  // Unchanged parts of the file are copied byte for byte
+  const before = Ooxml.openPackage(original);
+  const after = Ooxml.openPackage(bytes);
+  ['xl/styles.xml', 'xl/sharedStrings.xml', 'xl/worksheets/sheet2.xml', 'xl/charts/chart1.xml'].forEach(p => {
+    assert.ok(before.has(p), 'fixture part ' + p);
+    assert.deepStrictEqual(Buffer.from(after.get(p)), Buffer.from(before.get(p)), 'Beze změny: ' + p);
+  });
+
+  // A second update replaces the status sheet instead of adding another one
+  const again = XLSX.read(XlsxUpdateExporter.updateWorkbook(Object.assign({ original: bytes, sheetName: 'Data', headerRow: 1 }, spec)), { type: 'array' });
+  assert.deepStrictEqual(again.SheetNames, ['Data', 'Jiný', 'Stav_prekladu']);
+});
+
+runTest('Excel export do původního sešitu: existující sloupec nové verze se přepíše na místě', () => {
+  const { original, spec } = richWorkbookSpec({ mappings: { languages: { 'CS 2024': { label: 'CS', newCol: 'Poznámka', newColName: '' } } } });
+  assert.deepStrictEqual(spec.columns.map(c => [c.letter, c.styleFrom]), [['E', 'D']]);
+  const bytes = XlsxUpdateExporter.updateWorkbook(Object.assign({ original, sheetName: 'Data', headerRow: 1 }, spec));
+  const ws = XLSX.read(bytes, { type: 'array' }).Sheets.Data;
+  assert.strictEqual(ws.E1.v, 'Poznámka', 'Záhlaví existujícího sloupce zůstane');
+  assert.strictEqual(ws.E2.v, 'Nový text jedna.\nDruhý řádek & <znaky>');
+  assert.strictEqual(ws.I1, undefined, 'Žádný nový sloupec');
+  assert.throws(() => XlsxUpdateExporter.updateWorkbook(Object.assign({ original, sheetName: 'Chybí', headerRow: 1 }, spec)), e => e.code === 'MISSING_SHEET');
+  assert.throws(() => ComparatorEngine.prepareWorkbookUpdate({ rows: [{ A: 'x', B: 'y', C: 'z' }], headers: ['A', 'B', 'C'], mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: ['C'], languages: {} }, columnLetters: {} }),
+    e => e.code === 'MISSING_COLUMN');
 });
 
 console.log(`\n========================================`);

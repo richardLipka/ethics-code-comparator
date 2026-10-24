@@ -165,6 +165,8 @@
   function restoreProjectFromData(data) {
     resetWorkspaceForNewTable();
     state.importSource = null;
+    // The original file is not part of the project; format-preserving exports ask for it
+    if (!state.originalFile || state.originalFile.name !== data.fileName) state.originalFile = null;
     state.fileName = data.fileName || '';
     state.activeSheet = data.activeSheet || '';
     state.sheetNames = state.activeSheet ? [state.activeSheet] : [];

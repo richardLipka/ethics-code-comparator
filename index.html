@@ -38,6 +38,7 @@
       </button>
       <input type="file" id="projectFileInput" accept=".json,application/json" style="display:none;">
       <input type="file" id="translationsFileInput" style="display:none;">
+      <input type="file" id="originalFileInput" style="display:none;">
 
       <!-- Language Switcher (CZ / EN) -->
       <button class="btn btn-outline btn-sm btn-strong" id="langToggleBtn">
@@ -401,7 +402,13 @@
               <h2 class="export-title" data-i18n="comprehensiveTitle">Kompletní sešit (stará + nová verze)</h2>
               <p class="export-desc" data-i18n="comprehensiveDesc"></p>
             </div>
-            <button class="btn btn-primary" id="downloadComprehensiveBtn" data-i18n="comprehensiveBtn">📥 Stáhnout kompletní sešit (.xlsx)</button>
+            <div class="export-actions-stack">
+              <button class="btn btn-primary" id="downloadComprehensiveBtn" data-i18n="comprehensiveBtn">📥 Stáhnout kompletní sešit (.xlsx)</button>
+              <div class="export-actions-stack" id="updateOriginalWrapper" style="display:none;">
+                <button class="btn btn-outline" id="updateOriginalBtn" data-i18n="updateOriginalBtn">📥 Aktualizovat původní sešit (zachová formát)</button>
+                <p class="export-hint" data-i18n="updateOriginalHint"></p>
+              </div>
+            </div>
           </div>
 
           <!-- New version only -->
@@ -441,8 +448,10 @@
               <button class="btn btn-primary" id="printPdfBtn" data-i18n="pdfPrintBtn">🖨️ Otevřít tisk / Uložit do PDF</button>
               <div class="button-row">
                 <button class="btn btn-outline btn-sm grow" id="downloadPdfHtmlBtn" data-i18n="pdfDownloadHtmlBtn">📥 Stáhnout HTML</button>
+                <button class="btn btn-outline btn-sm grow" id="downloadDocxBtn" data-i18n="docxBtn">📄 Word (.docx)</button>
                 <button class="btn btn-secondary btn-sm grow" id="printAllPdfBtn" data-i18n="pdfAllBtn">📑 Tisk všech jazyků</button>
               </div>
+              <p class="export-hint" id="docxOriginalHint" style="display:none;" data-i18n="docxOriginalHint"></p>
               <button class="btn btn-outline btn-sm" id="editPdfTemplateBtn" data-i18n="editPdfTemplateBtn">⚙️ Upravit hlavičku dokumentu</button>
             </div>
           </div>
@@ -665,12 +674,15 @@
   <!-- Import / export adapters (register themselves; add new formats here, see docs/ADAPTERS.md) -->
   <script src="js/io/importers.js"></script>
   <script src="js/io/excel-importer.js"></script>
+  <script src="js/io/ooxml.js"></script>
   <script src="js/io/word-importer.js"></script>
   <script src="js/io/text-importer.js"></script>
   <script src="js/io/exporters.js"></script>
   <script src="js/io/excel-exporter.js"></script>
   <script src="js/io/html-document-exporter.js"></script>
   <script src="js/io/summary-exporters.js"></script>
+  <script src="js/io/docx-exporter.js"></script>
+  <script src="js/io/xlsx-update-exporter.js"></script>
 
   <!-- Main Application Logic -->
   <script src="js/app/core.js"></script>

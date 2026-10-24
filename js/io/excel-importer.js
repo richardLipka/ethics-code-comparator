@@ -110,7 +110,9 @@
       rowNumbers: rawRows.map(function (r, i) {
         return typeof r.__rowNum__ === 'number' ? r.__rowNum__ + 1 : i + (hasHeaderRow ? 2 : 1);
       }),
-      columnLetters: columnLetters
+      columnLetters: columnLetters,
+      // Sheet row that holds the column names (null without a header row)
+      headerRowNumber: hasHeaderRow ? range.s.r + 1 : null
     };
   }
 

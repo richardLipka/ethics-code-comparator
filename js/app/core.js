@@ -10,6 +10,7 @@
   const state = {
     currentStep: 1, // 1: Upload & Map, 2: Ref Overview, 3: Translation Studio, 4: Export
     importSource: null, // source returned by the import adapter (see js/io/importers.js)
+    originalFile: null, // { name, bytes } of the imported file, kept in memory for format-preserving exports
     fileName: '',
     sheetNames: [],
     activeSheet: '',
@@ -133,6 +134,11 @@
     approveUnchangedBtn: document.getElementById('approveUnchangedBtn'),
     batchPromptBtn: document.getElementById('batchPromptBtn'),
     smartPasteBtn: document.getElementById('smartPasteBtn'),
+    updateOriginalWrapper: document.getElementById('updateOriginalWrapper'),
+    updateOriginalBtn: document.getElementById('updateOriginalBtn'),
+    downloadDocxBtn: document.getElementById('downloadDocxBtn'),
+    docxOriginalHint: document.getElementById('docxOriginalHint'),
+    originalFileInput: document.getElementById('originalFileInput'),
     importTranslationsBtn: document.getElementById('importTranslationsBtn'),
     importTranslationsExportBtn: document.getElementById('importTranslationsExportBtn'),
     translationsFileInput: document.getElementById('translationsFileInput'),

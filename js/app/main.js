@@ -154,6 +154,8 @@
         openPdfTemplateModal: openPdfTemplateModal,
         exportManagerialSummary: exportManagerialSummary,
         exportTables: exportTables,
+        exportUpdatedWorkbook: App.exportUpdatedWorkbook,
+        exportDocx: App.exportDocx,
         renderTableFormatOptions: renderTableFormatOptions,
         exportProjectFile: exportProjectFile,
         loadProjectFile: loadProjectFile,

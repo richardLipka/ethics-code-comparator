@@ -182,6 +182,7 @@
       App.ensureStubsInitialized();
       App.updatePdfLanguageDropdown();
       App.renderTableFormatOptions();
+      App.updateOriginalExportOptions();
     }
 
     // Staying in the same step keeps the position (e.g. the column selection revealed after loading a file)

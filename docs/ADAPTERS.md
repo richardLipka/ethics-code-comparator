@@ -68,7 +68,8 @@ engine prepares a format-independent payload for each group:
 | Group | Payload | Built by | Default adapters |
 | --- | --- | --- | --- |
 | `table` | `{ tables: [{ name, headers, rows }] }` | `ComparatorEngine.prepareExportTables()` | `xlsx` (`excel-exporter.js`) |
-| `document` | document model | `ComparatorEngine.buildDocumentModel()` | `html-print`, `html-file` (`html-document-exporter.js`) |
+| `document` | document model | `ComparatorEngine.buildDocumentModel()` | `html-print`, `html-file` (`html-document-exporter.js`), `docx` (`docx-exporter.js`) |
+| `workbook-update` | `{ original, sheetName, headerRow, extension, columns, statusTable }` | `ComparatorEngine.prepareWorkbookUpdate()` + the original file | `xlsx-update` (`xlsx-update-exporter.js`) |
 | `summary` | change summary model | `ComparatorEngine.buildChangeSummary()` | `summary-markdown`, `summary-word`, `summary-print` (`summary-exporters.js`) |
 
 ```js
@@ -90,6 +91,11 @@ Exporters.register({
   `Exporters.openPrintWindow(html)`) and return `{ action: 'print' }`.
 - When more than one `table` adapter is registered, Step 4 shows a **table format** selector;
   the default adapter stays pre-selected.
+- Exporters that write into the **original file** receive its bytes: `docx` as `options.original`,
+  `xlsx-update` as `payload.original`. `Importers.importFile()` resolves with the file `content`,
+  which the application keeps in memory (and asks for again after a reload). `js/io/ooxml.js`
+  opens and rewrites Office packages and defines the paragraphs of a Word document, shared by
+  the Word importer and the `docx` exporter so that paragraph N is the same in both.
 - Document and summary models contain plain data (texts, numbers, row numbers, diff results) and
   `uiLang` for labels – no HTML. See `buildDocumentModel` / `buildChangeSummary` in the engine
   for their fields, and `html-document-exporter.js` / `summary-exporters.js` as examples.

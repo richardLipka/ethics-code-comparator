@@ -92,6 +92,7 @@
     return Importers.importFile(file).then(function (result) {
       state.fileName = file.name;
       state.importSource = result.source;
+      state.originalFile = result.content && typeof result.content.byteLength === 'number' ? { name: file.name, bytes: result.content } : null;
       state.sheetNames = result.source.sheetNames.slice();
 
       // Setup sheet select dropdown
@@ -167,6 +168,7 @@
   function loadSampleDemo() {
     state.fileName = 'ukazkovy_dokument.xlsx';
     state.importSource = null;
+    state.originalFile = null;
     state.hasHeaderRow = true;
     state.rows = SampleGenerator.getSampleData();
     state.headers = SampleGenerator.getSampleHeaders();

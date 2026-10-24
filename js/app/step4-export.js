@@ -170,16 +170,7 @@
   }
 
   function exportDocument(adapterId, col) {
-    const model = ComparatorEngine.buildDocumentModel({
-      rows: state.rows,
-      mappings: state.mappings,
-      translations: state.translations,
-      rowNumbers: state.rowNumbers,
-      targetCol: col,
-      documentName: documentBaseName(),
-      uiLang: I18n.getLanguage(),
-      template: state.pdfTemplate
-    });
+    const model = documentModel(col);
     return Exporters.run(adapterId, model, { baseName: documentBaseName() + '_' + model.language, uiLang: I18n.getLanguage() });
   }
 
@@ -239,6 +230,24 @@
       if (!col) return;
       exportDocument('html-file', col);
       showToast(t('toastPdfHtmlDownloaded'), 'success');
+    });
+
+    // Exports into a copy of the original file (keeps its formatting)
+    elements.updateOriginalBtn.addEventListener('click', exportUpdatedWorkbook);
+    elements.downloadDocxBtn.addEventListener('click', function () {
+      const col = selectedExportLang();
+      if (col) exportDocx(col);
+    });
+    elements.originalFileInput.addEventListener('change', function (e) {
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      const callback = pendingOriginalCallback;
+      pendingOriginalCallback = null;
+      if (!file || !callback) return;
+      const reader = new FileReader();
+      reader.onload = function () { callback(reader.result, file.name); };
+      reader.onerror = function () { alert(t('alertFileReadError', { MSG: file.name })); };
+      reader.readAsArrayBuffer(file);
     });
 
     // Print all languages
@@ -349,6 +358,162 @@
   }
 
   /**
+   * Format-preserving exports write into a copy of the file the table was imported from: the
+   * Excel workbook (complete workbook) or the Word document (translated document). The file is
+   * kept in memory after the upload; after reloading the page or opening a project file the user
+   * is asked to select it again, and it is checked to be the file the project was made from.
+   */
+  let pendingOriginalCallback = null;
+
+  function isOriginalWorkbook() {
+    return /\.(xlsx|xlsm)$/i.test(state.fileName || '');
+  }
+
+  function isOriginalWordDocument() {
+    return /\.docx$/i.test(state.fileName || '');
+  }
+
+  function updateOriginalExportOptions() {
+    elements.updateOriginalWrapper.style.display = isOriginalWorkbook() ? 'flex' : 'none';
+    elements.docxOriginalHint.style.display = isOriginalWordDocument() ? 'block' : 'none';
+  }
+
+  // Calls callback(bytes, fileName) with the original file, asking the user to select it if needed.
+  // Must run directly in a click handler (opening the file picker needs the user's click).
+  function withOriginalFile(accept, callback) {
+    if (state.originalFile && state.originalFile.name === state.fileName) {
+      callback(state.originalFile.bytes, state.originalFile.name);
+      return;
+    }
+    pendingOriginalCallback = callback;
+    showToast(t('pickOriginalFile', { NAME: state.fileName }), 'info');
+    elements.originalFileInput.setAttribute('accept', accept);
+    elements.originalFileInput.click();
+  }
+
+  function mismatchError(detailKey, params) {
+    const err = new Error(t(detailKey, params));
+    err.code = 'ORIGINAL_MISMATCH';
+    return err;
+  }
+
+  // The reference text of every processed row must be in the same row of the selected file
+  function checkOriginalRows(rows, rowNumbers, rowsByNumber) {
+    const col = state.mappings.refNewCol;
+    state.rows.forEach(function (row, idx) {
+      const n = rowNumbers[idx];
+      const found = rowsByNumber[n];
+      const expected = String(row[col] === undefined || row[col] === null ? '' : row[col]).trim();
+      const actual = found ? String(found[col] === undefined || found[col] === null ? '' : found[col]).trim() : null;
+      if (actual !== expected) throw mismatchError('originalMismatchRow', { ROW: n });
+    });
+  }
+
+  // Reads the sheet of the selected workbook the project was made from (null when it does not fit)
+  function readOriginalSheet(bytes, fileName) {
+    const source = Importers.get('excel').parse(bytes, { fileName: fileName });
+    if (source.sheetNames.indexOf(state.activeSheet) === -1) throw mismatchError('originalMismatchSheet', { SHEET: state.activeSheet });
+    const table = Importers.readSheet(source, state.activeSheet, { hasHeaderRow: state.hasHeaderRow });
+    if (!table) throw mismatchError('originalMismatchSheet', { SHEET: state.activeSheet });
+    state.headers.forEach(function (h) {
+      if (table.headers.indexOf(h) === -1) throw mismatchError('originalMismatchColumn', { COL: columnDisplayName(h) });
+    });
+    const byNumber = {};
+    table.rows.forEach(function (r, i) { byNumber[table.rowNumbers[i]] = r; });
+    checkOriginalRows(state.rows, state.rowNumbers, byNumber);
+    return table;
+  }
+
+  function reportOriginalError(err, fileName) {
+    if (!err || err.code !== 'ORIGINAL_MISMATCH') console.error(err);
+    if (err && err.code === 'ORIGINAL_MISMATCH') alert(t('originalMismatch', { NAME: fileName, DETAIL: err.message }));
+    else alert(t('alertOriginalExportError', { MSG: err && err.message ? err.message : '' }));
+  }
+
+  function exportUpdatedWorkbook() {
+    if (!state.rows || state.rows.length === 0) {
+      showToast(t('toastNoData'), 'warning');
+      return;
+    }
+    const mappingError = getMappingError(true);
+    if (mappingError) {
+      showToast(t(mappingError), 'warning');
+      return;
+    }
+    ensureStubsInitialized();
+    withOriginalFile('.xlsx,.xlsm', function (bytes, fileName) {
+      try {
+        const table = readOriginalSheet(bytes, fileName);
+        state.originalFile = { name: state.fileName, bytes: bytes };
+        const spec = ComparatorEngine.prepareWorkbookUpdate({
+          rows: state.rows,
+          headers: state.headers,
+          rowNumbers: state.rowNumbers,
+          mappings: state.mappings,
+          translations: state.translations,
+          skippedRows: state.skippedRows,
+          columnLetters: table.columnLetters,
+          hasHeaderRow: state.hasHeaderRow,
+          uiLang: I18n.getLanguage()
+        });
+        const outcome = Exporters.run('xlsx-update', Object.assign({
+          original: bytes,
+          sheetName: state.activeSheet,
+          headerRow: table.headerRowNumber,
+          extension: /\.xlsm$/i.test(state.fileName) ? '.xlsm' : '.xlsx'
+        }, spec), { baseName: documentBaseName() + '_srovnani', uiLang: I18n.getLanguage() });
+        showToast(t('toastOriginalUpdated', { NAME: outcome.fileName }), 'success');
+        if (spec.unverifiedCount > 0) showToast(t('toastExportUnverified', { COUNT: spec.unverifiedCount }), 'warning');
+      } catch (err) {
+        reportOriginalError(err, fileName);
+      }
+    });
+  }
+
+  function documentModel(col) {
+    return ComparatorEngine.buildDocumentModel({
+      rows: state.rows,
+      mappings: state.mappings,
+      translations: state.translations,
+      rowNumbers: state.rowNumbers,
+      targetCol: col,
+      documentName: documentBaseName(),
+      uiLang: I18n.getLanguage(),
+      template: state.pdfTemplate
+    });
+  }
+
+  /**
+   * Word document of the selected language: written into a copy of the original document when the
+   * text came from Word, otherwise a new document.
+   */
+  function exportDocx(col) {
+    const model = documentModel(col);
+    const baseName = documentBaseName() + '_' + model.language;
+    if (!isOriginalWordDocument()) {
+      Exporters.run('docx', model, { baseName: baseName, uiLang: I18n.getLanguage() });
+      return;
+    }
+    withOriginalFile('.docx', function (bytes, fileName) {
+      try {
+        const source = Importers.get('word').parse(bytes, { fileName: fileName });
+        const table = Importers.readSheet(source, source.sheetNames[0]);
+        const byNumber = {};
+        table.rows.forEach(function (r, i) { byNumber[table.rowNumbers[i]] = r; });
+        const renamed = {};
+        Object.keys(byNumber).forEach(function (n) { renamed[n] = { [state.mappings.refNewCol]: byNumber[n][table.headers[0]] }; });
+        checkOriginalRows(state.rows, state.rowNumbers, renamed);
+        state.originalFile = { name: state.fileName, bytes: bytes };
+        const outcome = Exporters.run('docx', model, { baseName: baseName, uiLang: I18n.getLanguage(), original: bytes });
+        showToast(t('toastOriginalUpdated', { NAME: outcome.fileName }), 'success');
+        if (!model.isReference && model.missingCount > 0) showToast(t('toastDocxKept', { COUNT: model.missingCount }), 'warning');
+      } catch (err) {
+        reportOriginalError(err, fileName);
+      }
+    });
+  }
+
+  /**
    * Table exports (full, new version only, one language) through the selected table exporter
    * (default: Excel, see js/io/excel-exporter.js).
    */
@@ -416,5 +581,7 @@
   Object.assign(App, { updatePdfLanguageDropdown: updatePdfLanguageDropdown,
     exportManagerialSummary: exportManagerialSummary, initExports: initExports,
     initPdfTemplateSettings: initPdfTemplateSettings, openPdfTemplateModal: openPdfTemplateModal,
-    exportTables: exportTables, renderTableFormatOptions: renderTableFormatOptions });
+    exportTables: exportTables, renderTableFormatOptions: renderTableFormatOptions,
+    updateOriginalExportOptions: updateOriginalExportOptions, exportUpdatedWorkbook: exportUpdatedWorkbook,
+    exportDocx: exportDocx });
 }(window.App = window.App || {}));

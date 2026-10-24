@@ -5,13 +5,13 @@
  */
 (function (root, factory) {
   if (typeof define === 'function' && define.amd) {
-    define(['xlsx', 'importers'], factory);
+    define(['xlsx', 'importers', 'ooxml'], factory);
   } else if (typeof module === 'object' && module.exports) {
-    module.exports = factory(require('xlsx'), require('./importers'));
+    module.exports = factory(require('xlsx'), require('./importers'), require('./ooxml'));
   } else {
-    root.WordImporter = factory(root.XLSX, root.Importers);
+    root.WordImporter = factory(root.XLSX, root.Importers, root.Ooxml);
   }
-}(typeof self !== 'undefined' ? self : this, function (XLSX, Importers) {
+}(typeof self !== 'undefined' ? self : this, function (XLSX, Importers, Ooxml) {
   'use strict';
 
   const EXTENSIONS = ['.docx', '.doc', '.rtf'];
@@ -34,26 +34,10 @@
     });
   }
 
+  // The paragraph scan is shared with the .docx exporter (js/io/ooxml.js), so the paragraphs of a
+  // translated document are written back to exactly the paragraphs they were read from
   function parseDocxXml(xml) {
-    // Paragraph properties hold tab stop definitions (<w:tab .../>), which are not text
-    const pRegex = /<w:p(?:\s[^>]*)?>([\s\S]*?)<\/w:p>/g;
-    const tRegex = /<w:t(?:\s[^>]*)?>([\s\S]*?)<\/w:t>|<w:tab(?:\s[^>]*)?\/>|<w:(?:br|cr)(?:\s[^>]*)?\/>|<w:noBreakHyphen\/>/g;
-    const paragraphs = [];
-    let pMatch;
-    while ((pMatch = pRegex.exec(xml)) !== null) {
-      const pXml = pMatch[1].replace(/<w:pPr>[\s\S]*?<\/w:pPr>/g, '');
-      let pText = '';
-      let tMatch;
-      while ((tMatch = tRegex.exec(pXml)) !== null) {
-        if (tMatch[1] !== undefined) pText += decodeEntities(tMatch[1]);
-        else if (/^<w:tab/.test(tMatch[0])) pText += '\t';
-        else if (/^<w:noBreakHyphen/.test(tMatch[0])) pText += '-';
-        else pText += '\n';
-      }
-      pText = pText.trim();
-      if (pText) paragraphs.push(pText);
-    }
-    return paragraphs;
+    return Ooxml.docxParagraphs(xml).map(function (p) { return p.text; });
   }
 
   function parseHtmlDoc(html) {

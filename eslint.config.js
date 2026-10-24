@@ -10,6 +10,7 @@ const appGlobals = {
   SampleGenerator: 'readonly',
   StorageManager: 'readonly',
   Importers: 'readonly',
+  Ooxml: 'readonly',
   Exporters: 'readonly'
 };
 
