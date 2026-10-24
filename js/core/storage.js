@@ -67,6 +67,8 @@
       headers: state.headers,
       rows: state.rows,
       rowNumbers: state.rowNumbers,
+      // Letters of columns without a header name ("Column C"); missing in older files
+      columnLetters: state.columnLetters || {},
       // Rows excluded from processing; kept so the full workbook still contains them
       skippedRows: state.skippedRows || [],
       mappings: state.mappings, // { refOldCol, refNewCol, targetCols, languages: { [oldCol]: { label, newCol, newColName } } }
@@ -232,7 +234,7 @@
     let parsed;
     if (typeof jsonContent === 'string') {
       try {
-        parsed = JSON.parse(jsonContent.replace(/^﻿/, ''));
+        parsed = JSON.parse(jsonContent.replace(/^\uFEFF/, ''));
       } catch (e) {
         throw projectError('INVALID_JSON', 'not valid JSON (' + e.message + ')', { MSG: e.message });
       }
@@ -366,6 +368,10 @@
         return typeof c !== 'string' && !(isPlainObject(c) && typeof c.newOf === 'string');
       }))) {
       result.partialContextCols = null;
+      invalidSettings = true;
+    }
+    if (result.columnLetters !== undefined && result.columnLetters !== null && !isPlainObject(result.columnLetters)) {
+      result.columnLetters = {};
       invalidSettings = true;
     }
     if (result.skippedRows !== undefined && result.skippedRows !== null) {

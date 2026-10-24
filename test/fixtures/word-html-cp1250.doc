@@ -1,0 +1,69 @@
+<html>
+
+<head>
+<meta http-equiv=Content-Type content="text/html; charset=windows-1250">
+<meta name=Generator content="Microsoft Word 15 (filtered)">
+<style>
+<!--
+ /* Font Definitions */
+ @font-face
+	{font-family:"Cambria Math";
+	panose-1:2 4 5 3 5 4 6 3 2 4;}
+@font-face
+	{font-family:Aptos;}
+@font-face
+	{font-family:"Aptos Display";}
+ /* Style Definitions */
+ p.MsoNormal, li.MsoNormal, div.MsoNormal
+	{margin-top:0cm;
+	margin-right:0cm;
+	margin-bottom:8.0pt;
+	margin-left:0cm;
+	line-height:107%;
+	font-size:11.0pt;
+	font-family:"Aptos",sans-serif;}
+.MsoChpDefault
+	{font-family:"Aptos",sans-serif;}
+@page WordSection1
+	{size:595.3pt 841.9pt;
+	margin:70.85pt 70.85pt 70.85pt 70.85pt;}
+div.WordSection1
+	{page:WordSection1;}
+-->
+</style>
+
+</head>
+
+<body lang=CS style='word-wrap:break-word'>
+
+<div class=WordSection1>
+
+<p class=MsoNormal>První odstavec: žluťoučký kůň úpěl ďábelské ódy.</p>
+
+<p class=MsoNormal>Druhý odstavec &amp; &lt;tagy&gt; s &quot;uvozovkami&quot; —
+pomlčka.</p>
+
+<p class=MsoNormal>Třetí odstavec<br>
+s ručním zalomením.</p>
+
+<p class=MsoNormal>2026 – rok v poli</p>
+
+<table class=MsoNormalTable border=0 cellspacing=0 cellpadding=0
+ style='border-collapse:collapse'>
+ <tr>
+  <td width=302 valign=top style='width:8.0cm;padding:0cm 3.5pt 0cm 3.5pt'>
+  <p class=MsoNormal>Buňka A</p>
+  </td>
+  <td width=302 valign=top style='width:8.0cm;padding:0cm 3.5pt 0cm 3.5pt'>
+  <p class=MsoNormal>Buňka B</p>
+  </td>
+ </tr>
+</table>
+
+<p class=MsoNormal>&nbsp;</p>
+
+</div>
+
+</body>
+
+</html>

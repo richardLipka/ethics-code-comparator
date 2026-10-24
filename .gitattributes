@@ -1,2 +1,5 @@
 * text=auto eol=lf
 *.xlsx binary
+
+# Test fixtures are real files saved by Word / Excel; keep them byte-exact
+test/fixtures/** binary

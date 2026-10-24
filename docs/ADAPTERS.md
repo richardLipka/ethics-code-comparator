@@ -23,7 +23,7 @@ tests. Each adapter file registers itself when it is loaded; load it after `js/i
 
 Registry: `js/io/importers.js` (global `Importers`). Built-in importers:
 - `js/io/excel-importer.js` (`.xlsx`, `.xlsm`, `.xls`, `.ods`, `.csv`, via SheetJS)
-- `js/io/word-importer.js` (`.docx`, `.doc`)
+- `js/io/word-importer.js` (`.docx`, `.doc` – Word 97-2003, RTF or HTML saved as .doc –, `.rtf`)
 - `js/io/text-importer.js` (`.txt`)
 
 ```js
@@ -33,6 +33,7 @@ Importers.register({
   extensions: ['.json'],             // file picker filter + matching by extension
   // canImport(fileName, mimeType) { return ...; }   optional, default: extension match
   readAs: 'text',                    // 'text' (UTF-8) or 'arraybuffer' (default); may be a function
+                                     // for text in any encoding read bytes and use Importers.decodeText()
   parse(content, { fileName }) {
     const data = JSON.parse(content);
     return {

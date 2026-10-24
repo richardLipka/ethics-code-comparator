@@ -1710,3 +1710,17 @@ mark.search-highlight {
   border: 1px solid var(--border-color);
   margin-top: 0.75rem;
 }
+
+/* Partial workbook: download and read back the filled-in workbook */
+.export-actions-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.export-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}

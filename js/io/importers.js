@@ -134,6 +134,33 @@
     return normalizeTable(source.readSheet(name, options || {}));
   }
 
+  /**
+   * Decodes the bytes of a text file (CSV, TXT). A UTF-8 / UTF-16 byte order mark wins; otherwise
+   * strict UTF-8 is tried and, when the bytes are not valid UTF-8 (files saved by Excel or
+   * Notepad in a legacy code page), the text is decoded as Windows-1250 (Central European),
+   * falling back to Windows-1252. A string is returned unchanged (without a BOM).
+   */
+  function decodeText(content) {
+    if (typeof content === 'string') return content.replace(/^\uFEFF/, '');
+    const bytes = content instanceof Uint8Array ? content : new Uint8Array(content || []);
+    if (bytes.length >= 2 && bytes[0] === 0xFF && bytes[1] === 0xFE) return decodeWith('utf-16le', bytes.subarray(2));
+    if (bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF) return decodeWith('utf-16be', bytes.subarray(2));
+    const body = bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF ? bytes.subarray(3) : bytes;
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(body);
+    } catch (e) {
+      return decodeWith('windows-1250', body) || decodeWith('windows-1252', body);
+    }
+  }
+
+  function decodeWith(encoding, bytes) {
+    try {
+      return new TextDecoder(encoding).decode(bytes);
+    } catch (e) {
+      return '';
+    }
+  }
+
   function readFileContent(file, mode) {
     return new Promise(function (resolve, reject) {
       const reader = new FileReader();
@@ -181,6 +208,7 @@
     readSheet: readSheet,
     importFile: importFile,
     trimCell: trimCell,
+    decodeText: decodeText,
     extensionOf: extensionOf
   };
 }));

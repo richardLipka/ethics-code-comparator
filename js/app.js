@@ -133,6 +133,9 @@
     approveUnchangedBtn: document.getElementById('approveUnchangedBtn'),
     batchPromptBtn: document.getElementById('batchPromptBtn'),
     smartPasteBtn: document.getElementById('smartPasteBtn'),
+    importTranslationsBtn: document.getElementById('importTranslationsBtn'),
+    importTranslationsExportBtn: document.getElementById('importTranslationsExportBtn'),
+    translationsFileInput: document.getElementById('translationsFileInput'),
     layoutToggleBtn: document.getElementById('layoutToggleBtn'),
     auxLangSelect: document.getElementById('auxLangSelect'),
     articlesContainer: document.getElementById('articlesContainer'),
@@ -432,6 +435,7 @@
       }
     }
 
+    const stepChanged = state.currentStep !== stepNumber;
     state.currentStep = stepNumber;
 
     // Toggle active sections
@@ -464,7 +468,8 @@
       renderTableFormatOptions();
     }
 
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    // Staying in the same step keeps the position (e.g. the column selection revealed after loading a file)
+    if (stepChanged) window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
   /**
@@ -2605,6 +2610,114 @@
   }
 
   /**
+   * Translations read back from a workbook (a partial workbook filled in by a translator): texts
+   * are matched by row number and the language's new-version column, shown for confirmation and
+   * taken over as "awaiting review".
+   */
+  function initTranslationImport() {
+    const input = elements.translationsFileInput;
+    if (!input) return;
+    [elements.importTranslationsBtn, elements.importTranslationsExportBtn].forEach(function (btn) {
+      if (!btn) return;
+      btn.addEventListener('click', function () {
+        if (!state.rows || state.rows.length === 0) {
+          showToast(t('toastNoData'), 'warning');
+          return;
+        }
+        const mappingError = getMappingError(true);
+        if (mappingError) {
+          showToast(t(mappingError), 'warning');
+          return;
+        }
+        input.setAttribute('accept', Importers.acceptAttribute());
+        input.click();
+      });
+    });
+    input.addEventListener('change', function (e) {
+      if (e.target.files && e.target.files[0]) importTranslationsFile(e.target.files[0]);
+      e.target.value = '';
+    });
+  }
+
+  function importTranslationsFile(file) {
+    ensureStubsInitialized();
+    return Importers.importFile(file).then(function (result) {
+      // The first table of the file with a row-number column and a language column is used
+      let match = null;
+      let error = '';
+      result.source.sheetNames.some(function (name) {
+        const table = Importers.readSheet(result.source, name, { hasHeaderRow: true });
+        if (!table) return false;
+        const m = ComparatorEngine.matchImportedTranslations({
+          table: table,
+          rows: state.rows,
+          rowNumbers: state.rowNumbers,
+          mappings: state.mappings,
+          translations: state.translations
+        });
+        if (!m.error) match = m;
+        else if (error !== 'NO_LANGUAGE_COLUMN') error = m.error;
+        return !!match;
+      });
+
+      if (!match) {
+        if (error === 'NO_LANGUAGE_COLUMN') {
+          const names = [];
+          state.mappings.targetCols.forEach(function (col) {
+            const cfg = state.mappings.languages[col] || {};
+            [cfg.newCol, cfg.newColName, languageLabel(col)].forEach(function (n) {
+              if (n && names.indexOf(n) === -1) names.push(n);
+            });
+          });
+          alert(t('importTranslationsNoLangCol', { NAME: file.name, LIST: names.join(', ') }));
+        } else {
+          alert(t('importTranslationsNoRowCol', { NAME: file.name }));
+        }
+        return 0;
+      }
+
+      const withUpdates = match.languages.filter(function (l) { return l.updates.length > 0; });
+      if (withUpdates.length === 0) {
+        showToast(t('importTranslationsNothing', { NAME: file.name }), 'info');
+        return 0;
+      }
+      const lines = match.languages.map(function (l) {
+        return t('importTranslationsLine', { LANG: l.label, COL: l.column, COUNT: l.updates.length, SAME: l.unchanged });
+      });
+      if (match.unknownRows.length > 0) {
+        const shown = match.unknownRows.slice(0, 20).join(', ') + (match.unknownRows.length > 20 ? ', …' : '');
+        lines.push(t('importTranslationsUnknownRows', { LIST: shown }));
+      }
+      if (!confirm(t('confirmImportTranslations', { NAME: file.name, LIST: lines.join('\n') }))) return 0;
+
+      let count = 0;
+      withUpdates.forEach(function (l) {
+        const stubs = state.translations[l.col] || [];
+        l.updates.forEach(function (u) {
+          const stub = stubs[u.index];
+          if (!stub) return;
+          stub.targetNew = u.text;
+          stub.isVerified = false;
+          stub.status = 'draft';
+          count++;
+        });
+      });
+      renderTranslationStudio();
+      persistState(150);
+      showToast(t('toastTranslationsImported', { COUNT: count }), 'success');
+      return count;
+    }).catch(function (err) {
+      console.error('Import of translations failed:', err);
+      if (err && err.code === 'UNSUPPORTED') {
+        alert(t('alertUnsupportedFile', { NAME: file.name, FORMATS: Importers.acceptAttribute().split(',').join(', ') }));
+      } else {
+        alert(t('alertFileReadError', { MSG: err && err.message ? err.message : file.name }));
+      }
+      return 0;
+    });
+  }
+
+  /**
    * PDF Template Customization Modal
    */
   function initPdfTemplateSettings() {
@@ -2976,9 +3089,9 @@
     // Resume in the studio when the user has done any work beyond the automatic defaults
     const hasEdits = state.mappings.targetCols.some(function (col) {
       return (state.translations[col] || []).some(function (it) {
-        return it.classification === 'MODIFIED' || it.classification === 'ADDED'
+        return it && (it.classification === 'MODIFIED' || it.classification === 'ADDED'
           ? (it.targetNew || it.isVerified)
-          : false;
+          : false);
       });
     });
 
@@ -3056,6 +3169,7 @@
     initPromptSettings();
     initBatchPromptModal();
     initSmartPasteModal();
+    initTranslationImport();
     initPdfTemplateSettings();
     initAuxLangSelector();
     initProjectButtons();
@@ -3165,6 +3279,7 @@
         addNewLanguage: addNewLanguage,
         removeNewLanguage: removeNewLanguage,
         restoreProjectFromData: restoreProjectFromData,
+        importTranslationsFile: importTranslationsFile,
         initApp: initApp,
         approveUnchangedInActiveLanguage: approveUnchangedInActiveLanguage,
         approveAllUnchangedGlobal: approveAllUnchangedGlobal,

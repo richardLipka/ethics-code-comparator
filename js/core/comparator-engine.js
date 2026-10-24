@@ -1066,6 +1066,85 @@
   }
 
   /**
+   * Matches a table read back from a workbook (typically a partial workbook filled in by a
+   * translator) to the translation work. Rows are identified by the row-number column ("Řádek" /
+   * "Row"), a language by the column name its new version is exported under. Only non-empty
+   * cells that differ from the current text are proposed; removed paragraphs are never changed.
+   * Returns {
+   *   error: '' | 'NO_ROW_COLUMN' | 'NO_LANGUAGE_COLUMN',
+   *   languages: [{ col, label, column, updates: [{ index, rowNumber, text }], unchanged, empty }],
+   *   unknownRows: [row numbers not present in the project]
+   * }
+   */
+  function matchImportedTranslations(options) {
+    const table = options.table || { headers: [], rows: [] };
+    const headers = (table.headers || []).map(String);
+    const mappings = options.mappings || {};
+    const translations = options.translations || {};
+    const rows = options.rows || [];
+    const result = { error: '', languages: [], unknownRows: [] };
+
+    const rowLabels = [sheetLabels('cs').row, sheetLabels('en').row].map(function (l) { return l.toLowerCase(); });
+    const rowCol = headers.find(function (h) { return rowLabels.indexOf(h.trim().toLowerCase()) !== -1; });
+    if (!rowCol) {
+      result.error = 'NO_ROW_COLUMN';
+      return result;
+    }
+
+    const indexByRow = {};
+    rows.forEach(function (row, idx) { indexByRow[rowNumberOf(options.rowNumbers, idx)] = idx; });
+
+    // Column of each language's new version; the old version and the reference are never read
+    const reserved = [rowCol, mappings.refOldCol, mappings.refNewCol];
+    const claimed = {};
+    const langColumns = [];
+    (mappings.targetCols || []).forEach(function (col) {
+      const info = getLanguageInfo(mappings, col);
+      const candidates = [info.newCol, info.newColName, info.label].filter(Boolean);
+      const column = candidates.map(function (c) {
+        return headers.find(function (h) { return h.trim() === String(c).trim(); });
+      }).find(function (h) {
+        return h && h !== col && reserved.indexOf(h) === -1 && !claimed[h];
+      });
+      if (!column) return;
+      claimed[column] = true;
+      langColumns.push({ col: col, label: info.label, column: column });
+    });
+    if (langColumns.length === 0) {
+      result.error = 'NO_LANGUAGE_COLUMN';
+      return result;
+    }
+
+    const unknown = {};
+    langColumns.forEach(function (lc) {
+      const stubs = resolveStubs(rows, translations, lc.col, mappings);
+      const entry = { col: lc.col, label: lc.label, column: lc.column, updates: [], unchanged: 0, empty: 0 };
+      (table.rows || []).forEach(function (r) {
+        const rowNumber = parseInt(String(r[rowCol]).trim(), 10);
+        if (isNaN(rowNumber)) return;
+        const idx = indexByRow[rowNumber];
+        if (idx === undefined) {
+          unknown[rowNumber] = true;
+          return;
+        }
+        const stub = stubs[idx];
+        if (!stub || stub.classification === 'REMOVED' || stub.classification === 'EMPTY') return;
+        const text = r[lc.column] === undefined || r[lc.column] === null ? '' : String(r[lc.column]).trim();
+        if (!text) {
+          entry.empty++;
+        } else if (text === String(stub.targetNew || '').trim()) {
+          entry.unchanged++;
+        } else {
+          entry.updates.push({ index: idx, rowNumber: rowNumber, text: text });
+        }
+      });
+      result.languages.push(entry);
+    });
+    result.unknownRows = Object.keys(unknown).map(Number).sort(function (a, b) { return a - b; });
+    return result;
+  }
+
+  /**
    * Build a consolidated batch prompt for all modified/added paragraphs of one language.
    */
   function buildBatchCopilotPrompt(params) {
@@ -1564,6 +1643,7 @@
     buildDocumentModel: buildDocumentModel,
     prepareExportData: prepareExportData,
     prepareLanguageExportData: prepareLanguageExportData,
-    prepareExportTables: prepareExportTables
+    prepareExportTables: prepareExportTables,
+    matchImportedTranslations: matchImportedTranslations
   };
 }));

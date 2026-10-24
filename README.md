@@ -13,14 +13,17 @@ Offline webová aplikace pro správu jazykových verzí: porovnání **staré a 
 
 ## 🚀 Spuštění
 - **Bez instalace:** otevřete `index.html` v prohlížeči (Chrome, Edge, Firefox, Safari).
-- **Přes lokální server:** `node serve.js` a otevřete `http://localhost:3000`. Jiný port: `node serve.js 8080` (nebo proměnná `PORT`). Server obsluhuje jen soubory ze složky projektu.
+- **Přes lokální server:** `node serve.js` a otevřete `http://localhost:3000`. Jiný port: `node serve.js 8080` (nebo proměnná `PORT`). Server obsluhuje jen soubory ze složky projektu (bez skrytých souborů jako `.git`) a je dostupný jen z tohoto počítače; pro přístup ze sítě spusťte `HOST=0.0.0.0 node serve.js`.
 
 ---
 
 ## 📋 Postup práce
 
 ### Krok 1: Tabulka a výběr sloupců
-- Výchozí importér čte `.xlsx`, `.xlsm`, `.xls`, `.ods` a `.csv` (CSV jako UTF-8). U sešitu s více listy vyberete list. Další formáty lze doplnit importním adaptérem (viz níže).
+- Výchozí importér čte `.xlsx`, `.xlsm`, `.xls`, `.ods` a `.csv`. U sešitu s více listy vyberete list. Další formáty lze doplnit importním adaptérem (viz níže).
+- **CSV a `.txt`** se načtou v UTF-8 i ve starší kódové stránce Windows-1250 (např. „CSV (oddělený středníkem)“ z českého Excelu); oddělovač (čárka, středník, tabulátor) se pozná automaticky. Buňky CSV zůstanou textem – `0012` se nezmění na `12` a datum na číslo.
+- **Buňky s datem** v sešitu se načtou jako datum `RRRR-MM-DD` (s časem, pokud ho formát buňky zobrazuje), ne jako pořadové číslo dne.
+- **Word:** `.docx`, `.doc` (Word 97-2003 i dokument uložený Wordem jako RTF nebo HTML) a `.rtf` – každý odstavec (i buňka tabulky) je jeden řádek; z polí se převezme jen zobrazený výsledek.
 - **Bílé znaky na začátku a konci buněk se odstraní** (dlouhé buňky začínající prázdnými řádky tak v náhledu nevypadají prázdné).
 - Volba **„První řádek obsahuje názvy sloupců“** – bez záhlaví jsou sloupce pojmenovány A, B, C… a první řádek je považován za data.
 - Vyberete dva **referenční sloupce**: starou a novou verzi textu (v libovolném jazyce).
@@ -46,7 +49,7 @@ Offline webová aplikace pro správu jazykových verzí: porovnání **staré a 
 Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se pro dokument k tisku, shrnutí změn a částečný sešit.
 - **Kompletní sešit:** všechny původní sloupce i řádky; nová verze každého jazyka v jeho existujícím sloupci nebo v novém sloupci hned za starou verzí (existující data se nikdy nepřepíší). List `Stav_prekladu` ukazuje pro každý řádek a jazyk *Ověřeno / Čeká na kontrolu / Chybí překlad / Zrušeno*.
 - **Pouze nová verze:** odstavce platné v nové verzi, nová verze reference a všech jazyků, bez starých verzí.
-- **Částečný sešit pro jeden jazyk:** číslo řádku, zvolené další sloupce, stará a nová verze vybraného jazyka a stav – např. pro předání překladateli. Další sloupce se vybírají ve dvou skupinách: **nové verze** (nová reference a aktuální stav překladu ostatních jazyků, i když jejich sloupec v tabulce zatím neexistuje) a **původní sloupce** tabulky. Nové verze jsou v exportu na prvním místě; výchozí výběr je stará a nová reference.
+- **Částečný sešit pro jeden jazyk:** číslo řádku, zvolené další sloupce, stará a nová verze vybraného jazyka a stav – např. pro předání překladateli. **Vyplněný sešit lze načíst zpět** tlačítkem „📂 Importovat překlady ze sešitu“ (Krok 3 nebo 4): texty se spárují podle sloupce `Řádek`/`Row` a sloupce nové verze jazyka, aplikace před převzetím ukáže, kolik textů se změní (a které řádky v projektu nejsou), a převzaté texty označí jako *Čeká na kontrolu*. Prázdné buňky a zrušené odstavce se nemění. Další sloupce se vybírají ve dvou skupinách: **nové verze** (nová reference a aktuální stav překladu ostatních jazyků, i když jejich sloupec v tabulce zatím neexistuje) a **původní sloupce** tabulky. Nové verze jsou v exportu na prvním místě; výchozí výběr je stará a nová reference.
 - **Dokument pro tisk / PDF:** nová verze vybraného jazyka jako formátovaný dokument A4. Chybějící překlad je vyznačen a neúplný dokument je označen jako **KONCEPT** – nikdy se nepoužije zastaralý text. Hlavička (organizace, název, podtitul s `{LANG}`, verze, datum, úvod, podpisy, barva) je volitelná.
 - **Shrnutí změn vybraného jazyka:** statistika, upravené, nové a zrušené odstavce (u jazyka jeho stará a nová verze a stav kontroly) – Markdown, Word nebo tisk/PDF.
 - Po exportu aplikace upozorní, kolik odstavců ještě není schváleno nebo přeloženo.
@@ -72,8 +75,10 @@ Nahoře vyberete **jazyk** (referenci nebo některý z jazyků) – použije se 
 npm test
 ```
 
-- **Jádro a adaptéry (37 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty (překlad i ověření), Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér, úplnost a obecnost lokalizace.
-- **GUI v jsdom (42 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, pomocný referenční jazyk, ověření překladu, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu.
+- **Jádro a adaptéry (56 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty (překlad i ověření), Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér (CSV ve Windows-1250, data), Word importér na skutečných souborech Wordu (`test/fixtures`), import vyplněného částečného sešitu, úplnost a obecnost lokalizace.
+- **GUI v jsdom (48 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, pomocný referenční jazyk, ověření překladu, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu, import překladů ze sešitu.
+- **E2E (5 testů):** `npm run test:e2e` – celé průchody Kroky 1–4 pro vícejazyčný Excel, Word, text a jednosloupcový Excel.
+- Testy běží automaticky na GitHubu při každém push a pull requestu (`.github/workflows/test.yml`).
 
 V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlížeči.
 

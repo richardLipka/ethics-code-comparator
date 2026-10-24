@@ -682,8 +682,8 @@ runTest('Excel adaptér: list se záhlavím, bez záhlaví a CSV se převedou na
 
   const csv = ExcelImporter.parse('\uFEFFR;N\nGröße;Nová\n', { fileName: 'x.csv' });
   assert.deepStrictEqual(Importers.readSheet(csv, csv.sheetNames[0]).rows, [{ R: 'Größe', N: 'Nová' }]);
-  assert.strictEqual(ExcelImporter.readAs('x.csv'), 'text');
-  assert.strictEqual(ExcelImporter.readAs('x.xlsx'), 'arraybuffer');
+  // Files are read as bytes; CSV is decoded by the adapter (UTF-8 or a legacy code page)
+  assert.strictEqual(ExcelImporter.readAs, 'arraybuffer');
 });
 
 runTest('Importers: nový adaptér lze zaregistrovat a má přednost; model tabulky se normalizuje', () => {
@@ -1106,6 +1106,151 @@ runTest('i18n: všechny klíče z app.js a index.html existují v CS i EN; texty
   const allTexts = JSON.stringify(I18n.translations) + html.replace(/<script[\s\S]*?<\/script>/g, '');
   const specific = allTexts.match(/etick|ethic|kodex|němčin|german|deutsch|2024|2026/gi) || [];
   assert.deepStrictEqual(specific, [], 'Rozhraní nesmí předpokládat etický kodex, němčinu ani konkrétní roky');
+});
+
+// ---------------------------------------------------------------------------
+// Import / export regressions
+// ---------------------------------------------------------------------------
+
+const BOM = String.fromCharCode(0xFEFF);
+
+function fixtureBuffer(name) {
+  const b = fs.readFileSync(path.join(__dirname, 'fixtures', name));
+  return b.buffer.slice(b.byteOffset, b.byteOffset + b.length);
+}
+
+// Text of the Word fixtures (saved by Word as .doc 97-2003, .rtf and filtered HTML)
+const WORD_FIXTURE_PARAGRAPHS = [
+  'První odstavec: žluťoučký kůň úpěl ďábelské ódy.',
+  'Druhý odstavec & <tagy> s "uvozovkami" — pomlčka.',
+  'Třetí odstavec\ns ručním zalomením.',
+  '2026 – rok v poli',
+  'Buňka A',
+  'Buňka B'
+];
+
+runTest('CSV: Windows-1250 se středníky, texty zůstanou textem (0012, datum)', () => {
+  const cp1250 = { 'á': 0xE1, 'č': 0xE8, 'ř': 0xF8, 'ž': 0x9E, 'ť': 0x9D, 'ů': 0xF9, 'ý': 0xFD, 'í': 0xED };
+  const text = 'Název;Kód;Datum\r\nžluťoučký řádek;0012;1.2.2024\r\n';
+  const bytes = Uint8Array.from([...text].map(ch => cp1250[ch] || ch.charCodeAt(0)));
+  const source = ExcelImporter.parse(bytes.buffer, { fileName: 'export.csv' });
+  const table = Importers.readSheet(source, source.sheetNames[0], { hasHeaderRow: true });
+  assert.deepStrictEqual(table.headers, ['Název', 'Kód', 'Datum']);
+  assert.deepStrictEqual(table.rows[0], { 'Název': 'žluťoučký řádek', 'Kód': '0012', 'Datum': '1.2.2024' });
+
+  // UTF-8 with BOM read as bytes (as the browser does) and as a string (custom callers)
+  const utf8 = Buffer.from(BOM + text, 'utf8');
+  const fromBytes = ExcelImporter.parse(utf8.buffer.slice(utf8.byteOffset, utf8.byteOffset + utf8.length), { fileName: 'export.csv' });
+  assert.strictEqual(Importers.readSheet(fromBytes, fromBytes.sheetNames[0]).rows[0]['Název'], 'žluťoučký řádek');
+  const fromString = ExcelImporter.parse(BOM + text, { fileName: 'export.csv' });
+  assert.strictEqual(Importers.readSheet(fromString, fromString.sheetNames[0]).rows[0]['Kód'], '0012');
+});
+
+runTest('Importers.decodeText: UTF-8, BOM, UTF-16 a Windows-1250', () => {
+  assert.strictEqual(Importers.decodeText(Buffer.from(BOM + 'čeština', 'utf8')), 'čeština');
+  assert.strictEqual(Importers.decodeText(Buffer.from(BOM + 'čeština', 'utf16le')), 'čeština');
+  assert.strictEqual(Importers.decodeText(Uint8Array.from([0xE8, 0x65, 0x9A, 0x74, 0x69, 0x6E, 0x61])), 'čeština');
+  assert.strictEqual(Importers.decodeText(BOM + 'text'), 'text');
+});
+
+runTest('TextImporter: soubor ve Windows-1250 se načte s diakritikou', () => {
+  const bytes = Uint8Array.from([0x50, 0xF8, 0xED, 0x6C, 0x69, 0x9A, 0x0D, 0x0A, 0x0D, 0x0A, 0x9E, 0x6C, 0x75, 0x9D, 0x6F, 0x75, 0xE8, 0x6B, 0xFD]);
+  const source = TextImporter.parse(bytes.buffer, { fileName: 'text.txt' });
+  assert.deepStrictEqual(Importers.readSheet(source, source.sheetNames[0]).rows.map(r => r.Reference), ['Příliš', 'žluťoučký']);
+});
+
+runTest('Excel: buňky s datem (formát d.m.yyyy z Excelu) se načtou jako datum ISO, ne jako číslo', () => {
+  const source = ExcelImporter.parse(fixtureBuffer('excel-dates.xlsx'), { fileName: 'excel-dates.xlsx' });
+  const row = Importers.readSheet(source, source.sheetNames[0], { hasHeaderRow: true }).rows[0];
+  assert.deepStrictEqual(row, { Text: 'Odstavec', Platnost: '2024-02-01', 'Čas': '2024-02-01 12:00' });
+});
+
+runTest('WordImporter: skutečné soubory Wordu – .doc 97-2003, .rtf a HTML .doc ve Windows-1250', () => {
+  ['word97.doc', 'word.rtf', 'word-html-cp1250.doc'].forEach(name => {
+    const source = WordImporter.parse(fixtureBuffer(name), { fileName: name });
+    const texts = Importers.readSheet(source, source.sheetNames[0]).rows.map(r => r.Reference);
+    assert.deepStrictEqual(texts, WORD_FIXTURE_PARAGRAPHS, name);
+  });
+  assert.ok(Importers.findForFile('smlouva.rtf'), '.rtf má importér');
+});
+
+runTest('WordImporter: .docx – entity se dekódují jen jednou, zalomení a tabulátory', () => {
+  const xml = '<w:document><w:body>' +
+    '<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/></w:tabs></w:pPr><w:r><w:t>A &amp;lt;b&amp;gt; &amp; C</w:t></w:r></w:p>' +
+    '<w:p><w:r><w:t>Řádek 1</w:t><w:br w:type="textWrapping"/><w:t>Řádek 2</w:t><w:tab/><w:t>X</w:t></w:r></w:p>' +
+    '</w:body></w:document>';
+  const zip = XLSX.CFB.utils.cfb_new();
+  XLSX.CFB.utils.cfb_add(zip, '/word/document.xml', Buffer.from(xml, 'utf8'));
+  const bytes = XLSX.CFB.write(zip, { type: 'array', fileType: 'zip' });
+  const source = WordImporter.parse(bytes, { fileName: 'a.docx' });
+  assert.deepStrictEqual(Importers.readSheet(source, source.sheetNames[0]).rows.map(r => r.Reference), ['A &lt;b&gt; & C', 'Řádek 1\nŘádek 2\tX']);
+});
+
+runTest('Excel export: sloupec bez názvu v záhlaví se nevyexportuje jako "__EMPTY"', () => {
+  const wb = ExcelExporter.buildWorkbook({ tables: [{ name: 'S', headers: ['Text', '__EMPTY', '__EMPTY_1'], rows: [{ Text: 'a', __EMPTY: 'b', __EMPTY_1: 'c' }] }] });
+  const aoa = XLSX.utils.sheet_to_json(wb.Sheets.S, { header: 1, defval: '' });
+  assert.deepStrictEqual(aoa, [['Text', '', ''], ['a', 'b', 'c']]);
+});
+
+runTest('Soubor projektu: písmena sloupců bez názvu se uloží a načtou', () => {
+  const state = {
+    fileName: 't.xlsx', headers: ['A', 'B'], hasHeaderRow: false, columnLetters: { A: 'A', B: 'B' },
+    rows: [{ A: 'x', B: 'y' }], rowNumbers: [1],
+    mappings: { refOldCol: 'A', refNewCol: 'B', targetCols: [], languages: {} }, translations: {}
+  };
+  const loaded = StorageManager.parseProjectJson(StorageManager.serializeProjectJson(state));
+  assert.deepStrictEqual(loaded.columnLetters, { A: 'A', B: 'B' });
+  const bad = JSON.parse(StorageManager.serializeProjectJson(state));
+  bad.columnLetters = 'x';
+  const loadedBad = StorageManager.parseProjectJson(bad);
+  assert.deepStrictEqual(loadedBad.columnLetters, {});
+  assert.ok(loadedBad.warnings.some(w => w.code === 'INVALID_SETTINGS'));
+});
+
+runTest('Import překladů: částečný sešit vyplněný překladatelem se spáruje podle řádků', () => {
+  const rows = [
+    { 'Ref 1': 'A old', 'Ref 2': 'A new text', 'CS 1': 'A cs' },
+    { 'Ref 1': 'B', 'Ref 2': 'B', 'CS 1': 'B cs' },
+    { 'Ref 1': 'C removed', 'Ref 2': '', 'CS 1': 'C cs' },
+    { 'Ref 1': '', 'Ref 2': 'D added', 'CS 1': '' }
+  ];
+  const headers = ['Ref 1', 'Ref 2', 'CS 1'];
+  const rowNumbers = [2, 3, 4, 6];
+  const mappings = { refOldCol: 'Ref 1', refNewCol: 'Ref 2', targetCols: ['CS 1'], languages: { 'CS 1': { label: 'CS', newCol: '', newColName: 'CS new' } } };
+  const translations = {};
+  const exported = ComparatorEngine.prepareExportTables({
+    rows, headers, rowNumbers, mappings, translations, exportType: 'language', langCol: 'CS 1',
+    contextCols: ['Ref 1', 'Ref 2'], uiLang: 'cs'
+  });
+  // Round trip through a real workbook, as the translator would send it back
+  const wb = ExcelExporter.buildWorkbook({ tables: exported.tables });
+  const aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
+  const newIdx = aoa[0].indexOf('CS new');
+  assert.ok(newIdx > 0, 'sloupec nové verze v exportu');
+  aoa[1][newIdx] = 'A cs NEW';
+  aoa[3][newIdx] = 'ignorováno (zrušený odstavec)';
+  aoa[4][newIdx] = 'D cs';
+  const unknown = aoa[0].map(() => '');
+  unknown[0] = 99;
+  unknown[newIdx] = 'neznámý řádek';
+  aoa.push(unknown);
+  const wb2 = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb2, XLSX.utils.aoa_to_sheet(aoa), 'CS');
+  const source = ExcelImporter.parse(XLSX.write(wb2, { type: 'array', bookType: 'xlsx' }), { fileName: 'cs.xlsx' });
+  const table = Importers.readSheet(source, 'CS', { hasHeaderRow: true });
+
+  const match = ComparatorEngine.matchImportedTranslations({ table, rows, rowNumbers, mappings, translations });
+  assert.strictEqual(match.error, '');
+  assert.strictEqual(match.languages.length, 1);
+  assert.strictEqual(match.languages[0].column, 'CS new');
+  assert.deepStrictEqual(match.languages[0].updates.map(u => [u.index, u.rowNumber, u.text]), [[0, 2, 'A cs NEW'], [3, 6, 'D cs']]);
+  assert.strictEqual(match.languages[0].unchanged, 1, 'nezměněný odstavec B');
+  assert.deepStrictEqual(match.unknownRows, [99]);
+
+  const noRow = ComparatorEngine.matchImportedTranslations({ table: { headers: ['CS new'], rows: [{ 'CS new': 'x' }] }, rows, rowNumbers, mappings, translations });
+  assert.strictEqual(noRow.error, 'NO_ROW_COLUMN');
+  const noLang = ComparatorEngine.matchImportedTranslations({ table: { headers: ['Row', 'CS 1'], rows: [{ Row: 2, 'CS 1': 'x' }] }, rows, rowNumbers, mappings, translations });
+  assert.strictEqual(noLang.error, 'NO_LANGUAGE_COLUMN', 'stará verze jazyka se nikdy nečte jako nová');
 });
 
 console.log(`\n========================================`);

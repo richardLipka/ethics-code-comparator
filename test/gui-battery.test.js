@@ -272,7 +272,7 @@ runTest('GUI Boot: výchozí zobrazení, obecné texty a přepínání jazyků C
   langBtn.click();
   assert.strictEqual(document.documentElement.getAttribute('lang'), 'en');
   assert.strictEqual(langBtn.textContent.trim(), '🇨🇿 Čeština');
-  assert.strictEqual(document.querySelector('[data-i18n="dropzoneTitle"]').textContent.trim(), 'Drag & drop a file (Excel, OpenDocument or CSV) here or click to browse');
+  assert.strictEqual(document.querySelector('[data-i18n="dropzoneTitle"]').textContent.trim(), 'Drag & drop a file (Excel, OpenDocument, CSV, Word or text) here or click to browse');
   assert.strictEqual(document.getElementById('saveProjectBtn').textContent, '💾 Save project');
   langBtn.click();
   assert.strictEqual(document.getElementById('loadProjectBtn').textContent, '📂 Načíst projekt');
@@ -1625,6 +1625,53 @@ runTest('Rychlý výběr jazyků pro přímý překlad (tlačítka rychlých jaz
 });
 
 // Výsledky
+runTest('Import překladů ze sešitu: vyplněný částečný sešit se po potvrzení převezme ke kontrole', async () => {
+  const { window, document } = createDomEnvironment();
+  openCzechStudio(window);
+  const state = window.__app.state;
+  const stubs = state.translations['CS 2024'];
+  const idx = state.rowNumbers.indexOf(5);
+  assert.strictEqual(stubs[idx].classification, 'MODIFIED');
+  stubs[idx].isVerified = true;
+  const unchangedIdx = state.rowNumbers.indexOf(2);
+
+  // Buttons in Step 3 and Step 4 open the file picker
+  let picked = 0;
+  document.getElementById('translationsFileInput').click = () => { picked++; };
+  document.getElementById('importTranslationsBtn').click();
+  window.__app.setStep(4);
+  document.getElementById('importTranslationsExportBtn').click();
+  assert.strictEqual(picked, 2);
+
+  // A file without the row column is explained and changes nothing
+  await window.__app.importTranslationsFile(workbookFile(window, { CS: [['CS 2026'], ['x']] }, 'bez_radku.xlsx'));
+  assert.ok(/Řádek/.test(window.__lastAlert), 'Vysvětlení chybějícího sloupce Řádek');
+
+  // Declined confirmation changes nothing
+  const file = () => workbookFile(window, {
+    CS: [['Řádek', 'DE 2026 (Referenz)', 'CS 2026', 'Stav'],
+      [2, '', stubs[unchangedIdx].targetNew, 'Ověřeno'],
+      [5, '', 'Dárky do 50 EUR.', 'Ověřeno'],
+      [999, '', 'Neznámý řádek', '']]
+  }, 'ukazkovy_dokument_CS.xlsx');
+  window.__confirmAnswer = false;
+  await window.__app.importTranslationsFile(file());
+  assert.notStrictEqual(stubs[idx].targetNew, 'Dárky do 50 EUR.');
+  assert.ok(/CS 2026/.test(window.__lastConfirm) && /999/.test(window.__lastConfirm), 'Potvrzení uvádí sloupec a neznámé řádky');
+
+  window.__confirmAnswer = true;
+  const count = await window.__app.importTranslationsFile(file());
+  assert.strictEqual(count, 1);
+  const updated = window.__app.state.translations['CS 2024'][idx];
+  assert.strictEqual(updated.targetNew, 'Dárky do 50 EUR.');
+  assert.strictEqual(updated.isVerified, false, 'Převzatý text čeká na kontrolu');
+  assert.ok(toastTexts(document).some(t => /Převzato 1/.test(t)));
+
+  // The same file again: nothing new
+  await window.__app.importTranslationsFile(file());
+  assert.ok(toastTexts(document).some(t => /žádné nové ani změněné/.test(t)));
+});
+
 runAllTests().then(() => {
   console.log('\n========================================');
   console.log(`VÝSLEDEK BATERIE GUI TESTŮ: ${passedTests} úspěšných, ${failedTests} chyb`);

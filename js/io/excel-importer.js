@@ -19,6 +19,30 @@
     return /\.csv$/i.test(fileName || '') || mimeType === 'text/csv';
   }
 
+  function pad2(n) {
+    return (n < 10 ? '0' : '') + n;
+  }
+
+  /**
+   * Text of a date cell as an unambiguous ISO date ("2024-02-01", with " 12:30" when the format
+   * shows a time), or null for other cells. SheetJS does not render every Excel date format
+   * (e.g. "d.m.yyyy") correctly, and the date is the same in every time zone this way.
+   */
+  function dateCellText(cell) {
+    if (!cell) return null;
+    let parts = null;
+    if (cell.t === 'd' && cell.v instanceof Date && !isNaN(cell.v)) {
+      const d = cell.v;
+      parts = { y: d.getFullYear(), m: d.getMonth() + 1, d: d.getDate(), H: d.getHours(), M: d.getMinutes() };
+    } else if (cell.t === 'n' && typeof cell.z === 'string' && XLSX.SSF.is_date(cell.z)) {
+      parts = XLSX.SSF.parse_date_code(cell.v);
+    }
+    if (!parts) return null;
+    const hasTime = cell.t === 'n' ? /[hs]/i.test(cell.z.replace(/"[^"]*"|\[[^\]]*\]/g, '')) : (parts.H || parts.M);
+    const date = parts.y + '-' + pad2(parts.m) + '-' + pad2(parts.d);
+    return hasTime ? date + ' ' + pad2(parts.H) + ':' + pad2(parts.M) : date;
+  }
+
   /**
    * Reads one sheet into the table model. With hasHeaderRow the first row holds the column names
    * (in the sheet's own order – Object.keys would move numeric names first); without it the
@@ -27,6 +51,13 @@
   function readWorksheet(sheet, hasHeaderRow) {
     const range = sheet && sheet['!ref'] ? XLSX.utils.decode_range(sheet['!ref']) : null;
     if (!range) return null;
+    // Date cells become text (a serial number would be meaningless in the texts, the project file
+    // and the exported workbook)
+    Object.keys(sheet).forEach(function (addr) {
+      if (addr.charAt(0) === '!') return;
+      const text = dateCellText(sheet[addr]);
+      if (text !== null) sheet[addr] = { t: 's', v: text };
+    });
     const rawRows = XLSX.utils.sheet_to_json(sheet, hasHeaderRow ? { defval: '' } : { header: 'A', defval: '' });
     if (!rawRows || rawRows.length === 0) return null;
 
@@ -90,14 +121,17 @@
     canImport: function (fileName, mimeType) {
       return EXTENSIONS.indexOf(Importers.extensionOf(fileName)) !== -1 || isCsv(fileName, mimeType);
     },
-    // CSV is decoded as UTF-8 text; reading it as bytes would garble diacritics
-    readAs: function (fileName, mimeType) {
-      return isCsv(fileName, mimeType) ? 'text' : 'arraybuffer';
-    },
+    // CSV is read as bytes and decoded here (UTF-8, or a legacy code page such as Windows-1250
+    // that Excel uses for "CSV (separated by semicolons)"); SheetJS alone would garble diacritics
+    readAs: 'arraybuffer',
     parse: function (content, options) {
-      const workbook = typeof content === 'string'
-        ? XLSX.read(content.replace(/^﻿/, ''), { type: 'string' })
-        : XLSX.read(new Uint8Array(content), { type: 'array' });
+      const fileName = options && options.fileName;
+      const csv = typeof content === 'string' || isCsv(fileName, options && options.mimeType);
+      // CSV cells stay text: "0012" must not become 12 and "1.2.2024" not a date serial number.
+      // Date cells of a spreadsheet are read as dates and shown as formatted in the sheet.
+      const workbook = csv
+        ? XLSX.read(Importers.decodeText(content), { type: 'string', raw: true })
+        : XLSX.read(new Uint8Array(content), { type: 'array', cellNF: true });
       return {
         fileName: options && options.fileName,
         sheetNames: workbook.SheetNames.slice(),

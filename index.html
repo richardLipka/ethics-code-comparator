@@ -37,6 +37,7 @@
         📂 Načíst projekt
       </button>
       <input type="file" id="projectFileInput" accept=".json,application/json" style="display:none;">
+      <input type="file" id="translationsFileInput" style="display:none;">
 
       <!-- Language Switcher (CZ / EN) -->
       <button class="btn btn-outline btn-sm" id="langToggleBtn" style="font-weight:700;">
@@ -91,9 +92,9 @@
         <!-- Drag & Drop Zone -->
         <div class="upload-dropzone" id="dropzone">
           <div class="upload-icon">📄</div>
-          <div class="upload-title" data-i18n="dropzoneTitle">Přetáhněte sem Excel soubor (.xlsx, .xls) nebo klikněte pro výběr</div>
+          <div class="upload-title" data-i18n="dropzoneTitle">Přetáhněte sem soubor (Excel, OpenDocument, CSV, Word nebo text) nebo klikněte pro výběr</div>
           <div class="upload-subtitle" data-i18n="dropzoneSubtitle">Soubor je zpracován výhradně ve vašem prohlížeči, bez jakéhokoliv odesílání na server.</div>
-          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.docx,.doc,.txt" style="display:none;">
+          <input type="file" id="fileInput" accept=".xlsx,.xlsm,.xls,.ods,.csv,.docx,.doc,.rtf,.txt" style="display:none;">
         </div>
 
         <!-- Demo & Backup Action Bar -->
@@ -336,6 +337,9 @@
             <button class="btn btn-primary btn-sm" id="smartPasteBtn" data-i18n="btnSmartPaste" title="Hromadné vložení vícedílné odpovědi od Copilota">
               📥 Smart Paste
             </button>
+            <button class="btn btn-outline btn-sm import-translations-btn" id="importTranslationsBtn" data-i18n="btnImportTranslations" data-i18n-title="importTranslationsTitle">
+              📂 Importovat překlady ze sešitu
+            </button>
           </div>
 
           <div style="display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap;">
@@ -419,7 +423,11 @@
               <label class="mapping-label" data-i18n="partialContextLabel">Referenční sloupce v exportu:</label>
               <div id="partialContextContainer" class="partial-context-list"></div>
             </div>
-            <button class="btn btn-primary" id="downloadPartialBtn" data-i18n="partialBtn">📥 Stáhnout částečný sešit (.xlsx)</button>
+            <div class="export-actions-stack">
+              <button class="btn btn-primary" id="downloadPartialBtn" data-i18n="partialBtn">📥 Stáhnout částečný sešit (.xlsx)</button>
+              <button class="btn btn-outline import-translations-btn" id="importTranslationsExportBtn" data-i18n="btnImportTranslations" data-i18n-title="importTranslationsTitle">📂 Importovat překlady ze sešitu</button>
+              <p class="export-hint" data-i18n="importTranslationsHint">Vyplněný částečný sešit lze načíst zpět tlačítkem „Importovat překlady ze sešitu“ (zde nebo v Kroku 3).</p>
+            </div>
           </div>
 
           <!-- Printable document -->

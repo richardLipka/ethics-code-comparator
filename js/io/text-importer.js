@@ -17,8 +17,7 @@
   const EXTENSIONS = ['.txt'];
 
   function parseText(content) {
-    const str = String(content || '')
-      .replace(/^\uFEFF/, '')
+    const str = Importers.decodeText(content || '')
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n')
       .trim();
@@ -42,7 +41,8 @@
     id: 'text',
     label: 'Text (.txt)',
     extensions: EXTENSIONS,
-    readAs: 'text',
+    // Bytes are decoded by Importers.decodeText (UTF-8 or a legacy code page such as Windows-1250)
+    readAs: 'arraybuffer',
     canImport: function (fileName, mimeType) {
       return EXTENSIONS.indexOf(Importers.extensionOf(fileName)) !== -1 || mimeType === 'text/plain';
     },

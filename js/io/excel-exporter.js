@@ -31,6 +31,11 @@
 
   function buildSheet(table) {
     const ws = XLSX.utils.json_to_sheet(table.rows, { header: table.headers });
+    // Columns imported without a header name (SheetJS keys "__EMPTY", "__EMPTY_1", …) keep an
+    // empty header cell instead of the internal key
+    table.headers.forEach(function (h, c) {
+      if (/^__EMPTY(_\d+)?$/.test(h)) ws[XLSX.utils.encode_cell({ r: 0, c: c })] = { t: 's', v: '' };
+    });
     ws['!cols'] = table.headers.map(function (h) {
       let maxLen = String(h).length;
       table.rows.forEach(function (r) {
