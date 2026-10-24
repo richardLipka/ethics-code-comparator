@@ -61,19 +61,19 @@
         <span class="step-number">1</span>
         <span data-i18n="step1Nav">1. Soubor & Mapování sloupců</span>
       </div>
-      <div class="step-divider"></div>
+      <div class="step-divider" id="stepDivider1"></div>
       <div class="step-item" id="stepNav2">
-        <span class="step-number">2</span>
+        <span class="step-number" id="stepNumber2">2</span>
         <span data-i18n="step2Nav">2. Přehled referenčních změn (DE)</span>
       </div>
-      <div class="step-divider"></div>
+      <div class="step-divider" id="stepDivider2"></div>
       <div class="step-item" id="stepNav3">
-        <span class="step-number">3</span>
+        <span class="step-number" id="stepNumber3">3</span>
         <span data-i18n="step3Nav">3. Pracovní plocha překladu</span>
       </div>
-      <div class="step-divider"></div>
+      <div class="step-divider" id="stepDivider3"></div>
       <div class="step-item" id="stepNav4">
-        <span class="step-number">4</span>
+        <span class="step-number" id="stepNumber4">4</span>
         <span data-i18n="step4Nav">4. Export & Stažení výsledků</span>
       </div>
     </nav>
@@ -123,22 +123,33 @@
           <h2 style="font-size:1rem; font-weight:700; color:var(--text-heading); margin-bottom:0.75rem;" data-i18n="mappingTitle">Výběr sloupců</h2>
 
           <div class="mapping-grid">
-            <div class="mapping-card">
+            <div class="mapping-card" id="refOldColCard">
               <label class="mapping-label" for="refOldSelect" data-i18n="refOldLabel">1. Reference – stará verze:</label>
               <select id="refOldSelect" class="form-select"></select>
               <small style="color:var(--text-muted); display:block; margin-top:0.35rem;" data-i18n="refOldHelp"></small>
             </div>
 
-            <div class="mapping-card">
-              <label class="mapping-label" for="refNewSelect" data-i18n="refNewLabel">2. Reference – nová verze:</label>
+            <div class="mapping-card" id="refNewColCard">
+              <label class="mapping-label" id="refNewColLabel" for="refNewSelect" data-i18n="refNewLabel">2. Reference – nová verze:</label>
               <select id="refNewSelect" class="form-select"></select>
-              <small style="color:var(--text-muted); display:block; margin-top:0.35rem;" data-i18n="refNewHelp"></small>
+              <small id="refNewColHelp" style="color:var(--text-muted); display:block; margin-top:0.35rem;" data-i18n="refNewHelp"></small>
+              <div id="directTransInfoBox" class="direct-trans-summary-card" style="display:none;"></div>
             </div>
 
-            <div class="mapping-card" style="grid-column: 1 / -1;">
-              <label class="mapping-label" data-i18n="targetColsLabel">3. Jazyky k aktualizaci:</label>
-              <small style="color:var(--text-muted); display:block; margin-bottom:0.5rem;" data-i18n="targetColsHelp"></small>
-              <div style="overflow-x:auto;">
+            <div class="mapping-card" id="targetColsCard" style="grid-column: 1 / -1;">
+              <label class="mapping-label" id="targetColsTitle" data-i18n="targetColsLabel">3. Jazyky k aktualizaci:</label>
+              <small id="targetColsHelp" style="color:var(--text-muted); display:block; margin-bottom:0.5rem;" data-i18n="targetColsHelp"></small>
+
+              <!-- Quick Language Picker for Direct Translation -->
+              <div id="quickLangsWrapper" style="display:none; margin-bottom:1rem;">
+                <div style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.35rem;" data-i18n="quickLangsTitle">Rychlá volba jazyka:</div>
+                <div class="quick-langs-container" id="quickLangsContainer"></div>
+                <div style="font-size:0.8rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.35rem;" data-i18n="selectedLangsTitle">Vybrané cílové jazyky:</div>
+                <div id="selectedDirectLangsList" class="selected-direct-langs"></div>
+              </div>
+
+              <!-- Traditional Table for Multi-column Spreadsheets -->
+              <div id="languagesTableWrapper" style="overflow-x:auto;">
                 <table class="language-table">
                   <thead>
                     <tr>
@@ -151,6 +162,7 @@
                   <tbody id="languagesTableBody"></tbody>
                 </table>
               </div>
+
               <div class="add-language-card" style="margin-top:1rem; padding:0.875rem 1rem; background:var(--bg-subtle, rgba(0,0,0,0.02)); border:1px dashed var(--border-color); border-radius:var(--radius-md);">
                 <div style="font-weight:600; font-size:0.875rem; margin-bottom:0.25rem; color:var(--text-heading);" data-i18n="addLanguageTitle">Přidat nový jazyk (není v původním souboru)</div>
                 <small style="color:var(--text-muted); display:block; margin-bottom:0.6rem;" data-i18n="addLanguageDesc">Pro jazyk vytvořený navíc bude k dispozici jeden sloupec a prompt pro Copilot bude prostý překlad bez historie změn.</small>
@@ -266,9 +278,14 @@
             <h1 class="card-title" data-i18n="step3Title">Krok 3: Pracovní plocha překladu & vizuální kontrola diffů</h1>
             <p class="card-desc" data-i18n="step3Desc">Nezměněné části jsou automaticky zkopírovány. U změn zkopírujte prompt pro Copilot a vložte výsledek s live diff kontrolou.</p>
           </div>
-          <button class="btn btn-primary" id="goToExportBtn" data-i18n="goToExportBtn">
-            Přejít k exportu hotových verzí →
-          </button>
+          <div style="display:flex; gap:0.5rem; align-items:center; flex-wrap:wrap;">
+            <button class="btn btn-outline" id="backToSettingsBtn" data-i18n="backToSettingsBtn">
+              ← Zpět k nastavení jazyků
+            </button>
+            <button class="btn btn-primary" id="goToExportBtn" data-i18n="goToExportBtn">
+              Přejít k exportu hotových verzí →
+            </button>
+          </div>
         </div>
 
         <!-- Cross-Language Progress Matrix -->

@@ -1447,14 +1447,11 @@ runTest('Nahrání textového souboru (.txt): rozdělení na odstavce jako refer
   document.getElementById('addNewLangBtn').click();
   await sleep(50);
 
-  // Potvrzení mapování a přechod do Kroku 2
+  // Potvrzení mapování a přímý přechod do překladového studia (Krok 2 se přeskakuje)
   document.getElementById('confirmMappingBtn').click();
-  await sleep(20);
-  assert.strictEqual(document.getElementById('step2Section').style.display, 'block');
-
-  // Přechod do překladového studia
-  document.getElementById('goToTranslationBtn').click();
   await sleep(50);
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'none');
+  assert.strictEqual(document.getElementById('step3Section').style.display, 'block');
 
   const card0 = document.getElementById('article-card-0');
   assert.ok(card0, 'Karta prvního odstavce existuje');
@@ -1511,25 +1508,32 @@ runTest('Nahrání Word dokumentu (.docx a .doc): odstavce jako referenční bu�
   assert.strictEqual(st.rows[0]['Reference'], 'HTML odstavec 1.');
   assert.strictEqual(st.rows[1]['Reference'], 'HTML odstavec 2.');
 
+  // Přímý režim: skrytí staré reference, zobrazení rychlého výběru jazyků a skrytí kroku 2 v navigaci
+  assert.strictEqual(document.getElementById('refOldColCard').style.display, 'none');
+  assert.strictEqual(document.getElementById('quickLangsWrapper').style.display, 'block');
+  assert.strictEqual(document.getElementById('stepNav2').style.display, 'none');
+
   // Přidání jazyka a dokončení workflow
   document.getElementById('newLangNameInput').value = 'Francouzština';
   document.getElementById('newLangColNameInput').value = 'FR';
   document.getElementById('addNewLangBtn').click();
   await sleep(50);
 
+  // Potvrzení mapování přejde přímo do studia (Krok 3)
   document.getElementById('confirmMappingBtn').click();
-  assert.strictEqual(document.getElementById('step2Section').style.display, 'block');
-
-  // Krok 2 ověření přehledu reference (žádné <del> značky když refOldCol chybí)
-  const diffRows = document.querySelectorAll('#refDiffTableBody tr');
-  assert.strictEqual(diffRows.length, 2);
-  assert.ok(diffRows[0].textContent.includes('HTML odstavec 1.'));
-  assert.strictEqual(diffRows[0].querySelectorAll('del').length, 0);
-
-  document.getElementById('goToTranslationBtn').click();
   await sleep(50);
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'none');
+  assert.strictEqual(document.getElementById('step3Section').style.display, 'block');
+
   const card0 = document.getElementById('article-card-0');
   assert.ok(card0.querySelector('.article-grid').classList.contains('layout-new-lang'));
+
+  // Tlačítko Zpět do nastavení jazyků v záhlaví studia
+  const backBtn = document.getElementById('backToSettingsBtn');
+  assert.strictEqual(backBtn.style.display, 'inline-flex');
+  backBtn.click();
+  await sleep(20);
+  assert.strictEqual(document.getElementById('step1Section').style.display, 'block');
 });
 
 runTest('Nahrání Excelu s jediným sloupcem: automatická nová reference bez staré, přidání jazyka a export', async () => {
@@ -1579,6 +1583,45 @@ runTest('Nahrání Excelu s jediným sloupcem: automatická nová reference bez 
   assert.deepStrictEqual(plain(compHeaders), ['Výchozí text', 'IT']);
   const compRows = window.XLSX.utils.sheet_to_json(sheetComp, { defval: '' });
   assert.strictEqual(compRows[0]['IT'], 'Primo paragrafo.');
+});
+
+runTest('Rychlý výběr jazyků pro přímý překlad (tlačítka rychlých jazyků a automatické přidání vepsaného jazyka)', async () => {
+  const { window, document } = createDomEnvironment();
+  const file = new window.File(['Odstavec 1\n\nOdstavec 2'], 'soubor.txt');
+
+  window.__app.processUploadedFile(file);
+  await sleep(100);
+
+  let quickBtns = document.querySelectorAll('.quick-lang-btn');
+  assert.ok(quickBtns.length >= 8, 'Rychlá tlačítka jazyků jsou vygenerována');
+
+  // Kliknutí na tlačítko přidá jazyk
+  quickBtns[0].click(); // CS
+  await sleep(30);
+  quickBtns = document.querySelectorAll('.quick-lang-btn');
+  assert.ok(quickBtns[0].classList.contains('active'));
+  assert.strictEqual(window.__app.state.mappings.targetCols.length, 1);
+
+  // Kliknutí na další tlačítko
+  quickBtns[2].click(); // EN
+  await sleep(30);
+  quickBtns = document.querySelectorAll('.quick-lang-btn');
+  assert.strictEqual(window.__app.state.mappings.targetCols.length, 2);
+
+  // Znovu kliknutí na první tlačítko jazyk odebere
+  quickBtns[0].click();
+  await sleep(30);
+  quickBtns = document.querySelectorAll('.quick-lang-btn');
+  assert.ok(!quickBtns[0].classList.contains('active'));
+  assert.strictEqual(window.__app.state.mappings.targetCols.length, 1);
+
+  // Napsání názvu jazyka do inputu a kliknutí na confirmMappingBtn jej automaticky přidá
+  document.getElementById('newLangNameInput').value = 'Španělština';
+  document.getElementById('confirmMappingBtn').click();
+  await sleep(50);
+
+  assert.strictEqual(window.__app.state.mappings.targetCols.length, 2);
+  assert.strictEqual(document.getElementById('step3Section').style.display, 'block');
 });
 
 // Výsledky

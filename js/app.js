@@ -72,6 +72,12 @@
     stepNav2: document.getElementById('stepNav2'),
     stepNav3: document.getElementById('stepNav3'),
     stepNav4: document.getElementById('stepNav4'),
+    stepDivider1: document.getElementById('stepDivider1'),
+    stepDivider2: document.getElementById('stepDivider2'),
+    stepDivider3: document.getElementById('stepDivider3'),
+    stepNumber2: document.getElementById('stepNumber2'),
+    stepNumber3: document.getElementById('stepNumber3'),
+    stepNumber4: document.getElementById('stepNumber4'),
     
     // Step 1 Controls
     sheetOptionsWrapper: document.getElementById('sheetOptionsWrapper'),
@@ -79,6 +85,18 @@
     sheetSelect: document.getElementById('sheetSelect'),
     hasHeaderRowCheckbox: document.getElementById('hasHeaderRowCheckbox'),
     mappingContainer: document.getElementById('mappingContainer'),
+    refOldColCard: document.getElementById('refOldColCard'),
+    refNewColCard: document.getElementById('refNewColCard'),
+    refNewColLabel: document.getElementById('refNewColLabel'),
+    refNewColHelp: document.getElementById('refNewColHelp'),
+    directTransInfoBox: document.getElementById('directTransInfoBox'),
+    targetColsCard: document.getElementById('targetColsCard'),
+    targetColsTitle: document.getElementById('targetColsTitle'),
+    targetColsHelp: document.getElementById('targetColsHelp'),
+    quickLangsWrapper: document.getElementById('quickLangsWrapper'),
+    quickLangsContainer: document.getElementById('quickLangsContainer'),
+    selectedDirectLangsList: document.getElementById('selectedDirectLangsList'),
+    languagesTableWrapper: document.getElementById('languagesTableWrapper'),
     refOldSelect: document.getElementById('refOldSelect'),
     refNewSelect: document.getElementById('refNewSelect'),
     languagesTableBody: document.getElementById('languagesTableBody'),
@@ -91,6 +109,7 @@
     previewTableBody: document.getElementById('previewTableBody'),
     previewRowsCount: document.getElementById('previewRowsCount'),
     previewShowMoreBtn: document.getElementById('previewShowMoreBtn'),
+    backToSettingsBtn: document.getElementById('backToSettingsBtn'),
 
     // Step 2 Controls
     kpiTotalRows: document.getElementById('kpiTotalRows'),
@@ -380,14 +399,20 @@
   /**
    * Stepper navigation
    */
+  function isDirectTranslationMode() {
+    return !!(state.headers && state.headers.length === 1);
+  }
+
   /**
    * Returns the i18n key of the first mapping problem, or '' when the mapping is usable.
    */
   function getMappingError(requireTargets) {
     const m = state.mappings;
     if (!m.refNewCol) return 'alertSelectRefCols';
-    if (m.refOldCol && m.refOldCol === m.refNewCol) return 'alertDifferentRefCols';
-    if (requireTargets && (!m.targetCols || m.targetCols.length === 0)) return 'alertSelectTargetLangs';
+    if (!isDirectTranslationMode() && m.refOldCol && m.refOldCol === m.refNewCol) return 'alertDifferentRefCols';
+    if (requireTargets && (!m.targetCols || m.targetCols.length === 0)) {
+      return isDirectTranslationMode() ? 'alertSelectTargetLangsDirect' : 'alertSelectTargetLangs';
+    }
     return '';
   }
 
@@ -395,6 +420,9 @@
     if (stepNumber > 1 && (!state.rows || state.rows.length === 0)) {
       showToast(t('toastNoData'), 'warning');
       return;
+    }
+    if (isDirectTranslationMode() && stepNumber === 2) {
+      stepNumber = 3;
     }
     if (stepNumber > 1) {
       const mappingError = getMappingError(stepNumber >= 3);
@@ -411,6 +439,10 @@
     elements.step2Section.style.display = stepNumber === 2 ? 'block' : 'none';
     elements.step3Section.style.display = stepNumber === 3 ? 'block' : 'none';
     elements.step4Section.style.display = stepNumber === 4 ? 'block' : 'none';
+
+    if (elements.backToSettingsBtn) {
+      elements.backToSettingsBtn.style.display = (stepNumber === 3 && isDirectTranslationMode()) ? 'inline-flex' : 'none';
+    }
 
     // Update nav classes
     [elements.stepNav1, elements.stepNav2, elements.stepNav3, elements.stepNav4].forEach(function (nav, idx) {
@@ -745,6 +777,9 @@
       const cfg = state.mappings.languages && state.mappings.languages[col];
       return (cfg && (cfg.label || cfg.newColName)) || String(col).replace(/^__new__/, '');
     }
+    if (col === 'Reference' && isDirectTranslationMode()) {
+      return t('sourceTextColumn');
+    }
     if (!state.hasHeaderRow || /^__EMPTY(_\d+)?$/.test(col)) {
       const letter = (state.columnLetters && state.columnLetters[col]) || (state.hasHeaderRow ? '?' : col);
       return t('columnLetterLabel', { COL: letter });
@@ -992,6 +1027,10 @@
 
     setLanguageUsed(id, true);
     renderLanguageTable();
+    if (isDirectTranslationMode()) {
+      renderQuickLangs();
+      renderSelectedDirectLangs();
+    }
     persistState(300);
     showToast(t('toastNewLangAdded', { NAME: trimmedName }), 'success');
     if (elements.newLangNameInput) elements.newLangNameInput.value = '';
@@ -1012,8 +1051,89 @@
       state.exportLangCol = state.mappings.targetCols[0] || '';
     }
     renderLanguageTable();
+    if (isDirectTranslationMode()) {
+      renderQuickLangs();
+      renderSelectedDirectLangs();
+    }
     persistState(300);
     showToast(t('toastNewLangRemoved', { NAME: name }), 'info');
+  }
+
+  const QUICK_LANGS = [
+    { code: 'CS', label: 'Čeština', flag: '🇨🇿' },
+    { code: 'SK', label: 'Slovenčina', flag: '🇸🇰' },
+    { code: 'EN', label: 'English', flag: '🇬🇧' },
+    { code: 'DE', label: 'DE', flag: '🇩🇪' },
+    { code: 'PL', label: 'Polski', flag: '🇵🇱' },
+    { code: 'FR', label: 'Français', flag: '🇫🇷' },
+    { code: 'ES', label: 'Español', flag: '🇪🇸' },
+    { code: 'IT', label: 'Italiano', flag: '🇮🇹' },
+    { code: 'UK', label: 'Українська', flag: '🇺🇦' }
+  ];
+
+  function isLanguageSelected(labelOrCode) {
+    const needle = (labelOrCode || '').toLowerCase();
+    return state.mappings.targetCols.some(function (c) {
+      const info = ComparatorEngine.getLanguageInfo(state.mappings, c);
+      const label = (info.label || '').toLowerCase();
+      const newColName = (info.newColName || '').toLowerCase();
+      const colId = String(c).toLowerCase();
+      return label === needle || newColName === needle || colId === needle;
+    });
+  }
+
+  function findColForLanguage(labelOrCode) {
+    const needle = (labelOrCode || '').toLowerCase();
+    return state.mappings.targetCols.find(function (c) {
+      const info = ComparatorEngine.getLanguageInfo(state.mappings, c);
+      const label = (info.label || '').toLowerCase();
+      const newColName = (info.newColName || '').toLowerCase();
+      const colId = String(c).toLowerCase();
+      return label === needle || newColName === needle || colId === needle;
+    }) || '';
+  }
+
+  function renderQuickLangs() {
+    if (!elements.quickLangsContainer) return;
+    elements.quickLangsContainer.innerHTML = '';
+    QUICK_LANGS.forEach(function (item) {
+      const selected = isLanguageSelected(item.label) || isLanguageSelected(item.code);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'quick-lang-btn' + (selected ? ' active' : '');
+      btn.innerHTML = `<span class="quick-lang-flag">${item.flag}</span> <span class="quick-lang-name">${ComparatorEngine.escapeHtml(item.label)}</span>` + (selected ? ' ✓' : '');
+      btn.addEventListener('click', function () {
+        if (selected) {
+          const col = findColForLanguage(item.label) || findColForLanguage(item.code);
+          if (col) removeNewLanguage(col);
+        } else {
+          addNewLanguage(item.label, item.label);
+        }
+      });
+      elements.quickLangsContainer.appendChild(btn);
+    });
+  }
+
+  function renderSelectedDirectLangs() {
+    if (!elements.selectedDirectLangsList) return;
+    const esc = ComparatorEngine.escapeHtml;
+    const cols = state.mappings.targetCols || [];
+    if (cols.length === 0) {
+      elements.selectedDirectLangsList.innerHTML = `<span style="color:var(--text-muted); font-size:0.85rem; font-style:italic;">${esc(t('noLangsSelectedYet'))}</span>`;
+      return;
+    }
+    elements.selectedDirectLangsList.innerHTML = '';
+    cols.forEach(function (col) {
+      const info = ComparatorEngine.getLanguageInfo(state.mappings, col);
+      const label = info.label || col;
+      const chip = document.createElement('div');
+      chip.className = 'selected-lang-chip';
+      chip.innerHTML = `<span>🌐 ${esc(label)}</span><button type="button" class="remove-direct-lang-btn" title="${esc(t('removeLangTitle'))}">✕</button>`;
+      chip.querySelector('.remove-direct-lang-btn').addEventListener('click', function () {
+        removeNewLanguage(col);
+      });
+      elements.selectedDirectLangsList.appendChild(chip);
+    });
   }
 
   /**
@@ -1074,6 +1194,43 @@
 
   function renderColumnMappingControls() {
     elements.mappingContainer.style.display = 'block';
+    const isDirect = isDirectTranslationMode();
+
+    if (isDirect) {
+      if (elements.refOldColCard) elements.refOldColCard.style.display = 'none';
+      if (elements.directTransInfoBox) elements.directTransInfoBox.style.display = 'block';
+      if (elements.refNewColLabel) elements.refNewColLabel.textContent = t('sourceTextLabel');
+      if (elements.refNewColHelp) elements.refNewColHelp.textContent = t('sourceTextCardHelp');
+      if (elements.targetColsTitle) elements.targetColsTitle.textContent = t('targetLangsDirectTitle');
+      if (elements.targetColsHelp) elements.targetColsHelp.textContent = t('targetLangsDirectHelp');
+      if (elements.quickLangsWrapper) elements.quickLangsWrapper.style.display = 'block';
+      if (elements.languagesTableWrapper) elements.languagesTableWrapper.style.display = 'none';
+      if (elements.confirmMappingBtn) elements.confirmMappingBtn.textContent = t('goToTranslationDirect');
+
+      if (elements.stepNav2) elements.stepNav2.style.display = 'none';
+      if (elements.stepDivider2) elements.stepDivider2.style.display = 'none';
+      if (elements.stepNumber3) elements.stepNumber3.textContent = '2';
+      if (elements.stepNumber4) elements.stepNumber4.textContent = '3';
+
+      renderQuickLangs();
+      renderSelectedDirectLangs();
+    } else {
+      if (elements.refOldColCard) elements.refOldColCard.style.display = '';
+      if (elements.directTransInfoBox) elements.directTransInfoBox.style.display = 'none';
+      if (elements.refNewColLabel) elements.refNewColLabel.textContent = t('refNewLabel');
+      if (elements.refNewColHelp) elements.refNewColHelp.textContent = t('refNewHelp');
+      if (elements.targetColsTitle) elements.targetColsTitle.textContent = t('targetColsLabel');
+      if (elements.targetColsHelp) elements.targetColsHelp.textContent = t('targetColsHelp');
+      if (elements.quickLangsWrapper) elements.quickLangsWrapper.style.display = 'none';
+      if (elements.languagesTableWrapper) elements.languagesTableWrapper.style.display = '';
+      if (elements.confirmMappingBtn) elements.confirmMappingBtn.textContent = t('confirmMappingBtn');
+
+      if (elements.stepNav2) elements.stepNav2.style.display = '';
+      if (elements.stepDivider2) elements.stepDivider2.style.display = '';
+      if (elements.stepNumber3) elements.stepNumber3.textContent = '3';
+      if (elements.stepNumber4) elements.stepNumber4.textContent = '4';
+    }
+
     fillColumnSelect(elements.refOldSelect, state.mappings.refOldCol, true);
     fillColumnSelect(elements.refNewSelect, state.mappings.refNewCol, false);
 
@@ -1671,15 +1828,17 @@
         </div>
       `;
 
-      // Column 1: Reference diff (or clean text if no old reference)
+      // Column 1: Reference diff (or clean text if no old reference / direct translation)
       const hasOldRef = !!stub.refOld;
+      const isDirect = isDirectTranslationMode();
+      const refTitle = isDirect ? t('cardSourceTextPanelTitle') : t('cardRefPanelTitle', { LANG: refLabel });
       const col1RefHtml = `
         <div class="sub-panel">
           <div class="sub-panel-title">
-            <span>${t('cardRefPanelTitle', { LANG: refLabel })}</span>
-            ${!hasOldRef ? '' : (refDiffRes.stats.hasChanges ? `<span style="font-size:0.75rem; color:#b45309; font-weight:600;">${t('changePct', { PCT: Math.round((1 - refDiffRes.stats.similarity) * 100) })}</span>` : `<span style="font-size:0.75rem; color:#15803d; font-weight:600;">${t('match100')}</span>`)}
+            <span>${refTitle}</span>
+            ${(!hasOldRef || isDirect) ? '' : (refDiffRes.stats.hasChanges ? `<span style="font-size:0.75rem; color:#b45309; font-weight:600;">${t('changePct', { PCT: Math.round((1 - refDiffRes.stats.similarity) * 100) })}</span>` : `<span style="font-size:0.75rem; color:#15803d; font-weight:600;">${t('match100')}</span>`)}
           </div>
-          <div class="diff-box">${(!hasOldRef ? ComparatorEngine.escapeHtml(stub.refNew) : refDiffHtml) || `<span style="color:var(--text-muted);">${t('emptyCell')}</span>`}</div>
+          <div class="diff-box">${((!hasOldRef || isDirect) ? ComparatorEngine.escapeHtml(stub.refNew) : refDiffHtml) || `<span style="color:var(--text-muted);">${t('emptyCell')}</span>`}</div>
         </div>
       `;
 
@@ -2946,6 +3105,10 @@
       state.mappings.refOldCol = elements.refOldSelect.value;
       state.mappings.refNewCol = elements.refNewSelect.value;
 
+      if (isDirectTranslationMode() && elements.newLangNameInput && elements.newLangNameInput.value.trim()) {
+        addNewLanguage(elements.newLangNameInput.value.trim(), elements.newLangColNameInput ? elements.newLangColNameInput.value.trim() : '');
+      }
+
       const mappingError = getMappingError(true);
       if (mappingError) {
         alert(t(mappingError));
@@ -2953,13 +3116,28 @@
       }
 
       finalizeLanguageConfig();
-      setStep(2);
+      if (isDirectTranslationMode()) {
+        setStep(3);
+      } else {
+        setStep(2);
+      }
       showToast(t('toastMappingSaved'), 'success');
     });
 
     elements.goToTranslationBtn.addEventListener('click', function () {
+      if (state.mappings.targetCols.length === 0) {
+        alert(t(isDirectTranslationMode() ? 'alertSelectTargetLangsDirect' : 'alertSelectTargetLangs'));
+        setStep(1);
+        return;
+      }
       setStep(3);
     });
+
+    if (elements.backToSettingsBtn) {
+      elements.backToSettingsBtn.addEventListener('click', function () {
+        setStep(1);
+      });
+    }
 
     elements.goToExportBtn.addEventListener('click', function () {
       setStep(4);
