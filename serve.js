@@ -4,6 +4,8 @@ const path = require('path');
 
 // Port: `node serve.js 8080`, or PORT=8080 node serve.js (default 3000)
 const PORT = parseInt(process.argv[2] || process.env.PORT || '3000', 10);
+// Only this computer can connect; HOST=0.0.0.0 makes the app reachable from the network
+const HOST = process.env.HOST || '127.0.0.1';
 const ROOT = path.resolve(__dirname);
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -39,9 +41,9 @@ const server = http.createServer((req, res) => {
 
   let fullPath = path.join(ROOT, safePath);
 
-  // Security check: never serve anything outside project folder
+  // Security check: never serve anything outside project folder, nor hidden files (.git, …)
   const rel = path.relative(ROOT, fullPath);
-  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+  if (rel.startsWith('..') || path.isAbsolute(rel) || rel.split(path.sep).some((part) => part.startsWith('.'))) {
     send(res, 403, '403 Forbidden');
     return;
   }
@@ -69,7 +71,7 @@ const server = http.createServer((req, res) => {
 
     const ext = path.extname(fullPath).toLowerCase();
     const mime = MIME_TYPES[ext] || 'application/octet-stream';
-    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache' });
+    res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' });
 
     const stream = fs.createReadStream(fullPath);
     stream.on('error', (streamErr) => {
@@ -92,6 +94,6 @@ server.on('error', (err) => {
   throw err;
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, HOST, () => {
   console.log(`Server běží na http://localhost:${PORT}`);
 });
