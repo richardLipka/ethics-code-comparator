@@ -42,7 +42,9 @@
       const isComplete = verified === total && total > 0;
       const isActive = col === state.activeTargetCol;
 
-      const pill = document.createElement('div');
+      const pill = document.createElement('button');
+      pill.type = 'button';
+      pill.setAttribute('aria-pressed', String(!!isActive));
       pill.className = 'matrix-pill' + (isActive ? ' active' : '') + (isComplete ? ' complete' : '');
       pill.innerHTML = `
         <span class="matrix-pill-lang">${ComparatorEngine.escapeHtml(languageLabel(col))}</span>
@@ -123,7 +125,9 @@
     elements.langTabsWrapper.innerHTML = '';
 
     state.mappings.targetCols.forEach(function (col) {
-      const tab = document.createElement('div');
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.setAttribute('aria-pressed', String(col === state.activeTargetCol));
       tab.className = 'lang-tab' + (col === state.activeTargetCol ? ' active' : '');
 
       const stubs = state.translations[col] || [];
@@ -219,8 +223,10 @@
       chip.addEventListener('click', function () {
         elements.filterChipsContainer.querySelectorAll('.filter-chip').forEach(function (c) {
           c.classList.remove('active');
+          c.setAttribute('aria-pressed', 'false');
         });
         chip.classList.add('active');
+        chip.setAttribute('aria-pressed', 'true');
         state.filterStatus = chip.getAttribute('data-status');
         App.renderArticleCards();
       });

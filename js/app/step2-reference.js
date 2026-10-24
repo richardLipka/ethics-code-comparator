@@ -41,9 +41,9 @@
       // Diff preview
       let diffHtml = '';
       if (!refOldCol) {
-        diffHtml = '<div class="diff-box" style="color:var(--text-primary);">' + ComparatorEngine.escapeHtml(refNew) + '</div>';
+        diffHtml = '<div class="diff-box diff-box-plain">' + ComparatorEngine.escapeHtml(refNew) + '</div>';
       } else if (classification === 'UNCHANGED') {
-        diffHtml = '<div class="diff-unchanged" style="max-height:80px; overflow-y:auto;">' + ComparatorEngine.escapeHtml(refOld) + '</div>';
+        diffHtml = '<div class="diff-unchanged diff-scroll">' + ComparatorEngine.escapeHtml(refOld) + '</div>';
       } else if (classification === 'ADDED') {
         diffHtml = '<div class="diff-box"><ins class="diff-ins">' + ComparatorEngine.escapeHtml(refNew) + '</ins></div>';
       } else if (classification === 'REMOVED') {
@@ -54,9 +54,9 @@
       }
 
       tr.innerHTML = `
-        <td style="padding:0.75rem; font-weight:700; font-family:var(--font-mono); white-space:nowrap; vertical-align:top;">${ComparatorEngine.escapeHtml(rowLabel)}</td>
-        <td style="padding:0.75rem; vertical-align:top;">${renderBadgeHtml(classification)}</td>
-        <td style="padding:0.75rem; vertical-align:top;">${diffHtml}</td>
+        <td class="ref-row-label">${ComparatorEngine.escapeHtml(rowLabel)}</td>
+        <td>${renderBadgeHtml(classification)}</td>
+        <td>${diffHtml}</td>
       `;
 
       elements.refDiffTableBody.appendChild(tr);

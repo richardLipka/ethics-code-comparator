@@ -1672,6 +1672,64 @@ runTest('Import překladů ze sešitu: vyplněný částečný sešit se po potv
   assert.ok(toastTexts(document).some(t => /žádné nové ani změněné/.test(t)));
 });
 
+runTest('Přístupnost: axe bez nálezů ve všech krocích a v dialogu (kontrast se ověřuje v prohlížeči)', async () => {
+  const axeSource = fs.readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
+  const { window, document } = createDomEnvironment();
+  window.eval(axeSource);
+  const audit = async (label) => {
+    const res = await window.axe.run(document, { rules: { 'color-contrast': { enabled: false } } });
+    const found = res.violations.map(v => `${label}: ${v.id} (${v.nodes.length}×, ${v.nodes[0].html.slice(0, 80)})`);
+    assert.strictEqual(found.join(' | '), '', 'Porušení přístupnosti');
+  };
+  await audit('start');
+  openCzechStudio(window);
+  await audit('krok 3');
+  window.__app.setStep(1);
+  await audit('krok 1');
+  window.__app.setStep(2);
+  await audit('krok 2');
+  window.__app.setStep(4);
+  await audit('krok 4');
+  document.getElementById('smartPasteBtn').click();
+  await audit('Smart Paste');
+});
+
+runTest('Přístupnost: ovládání klávesnicí, stav tlačítek a fokus v dialogu', async () => {
+  const { window, document } = createDomEnvironment();
+  // The upload area opens the file picker with Enter
+  let picked = 0;
+  document.getElementById('fileInput').click = () => { picked++; };
+  document.getElementById('dropzone').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  assert.strictEqual(picked, 1, 'Enter na oblasti pro nahrání otevře výběr souboru');
+
+  openCzechStudio(window);
+  assert.strictEqual(document.getElementById('stepNav3').getAttribute('aria-current'), 'step');
+  assert.strictEqual(document.getElementById('stepNav1').hasAttribute('aria-current'), false);
+  ['stepNav1', 'stepNav2', 'stepNav3', 'stepNav4'].forEach(id => assert.strictEqual(document.getElementById(id).tagName, 'BUTTON'));
+  assert.ok(Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab')).every(tab => tab.tagName === 'BUTTON'));
+  assert.strictEqual(document.querySelector('#langTabsWrapper .lang-tab.active').getAttribute('aria-pressed'), 'true');
+
+  const chip = document.querySelector('.filter-chip[data-status="pending"]');
+  chip.click();
+  assert.strictEqual(chip.getAttribute('aria-pressed'), 'true');
+  assert.strictEqual(document.querySelector('.filter-chip[data-status="all"]').getAttribute('aria-pressed'), 'false');
+
+  // Focus moves into the dialog and back to the button that opened it
+  const opener = document.getElementById('smartPasteBtn');
+  opener.focus();
+  opener.click();
+  await sleep(0);
+  assert.strictEqual(document.activeElement, document.getElementById('smartPasteInput'), 'Fokus v dialogu');
+  document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape' }));
+  await sleep(0);
+  assert.strictEqual(document.activeElement, opener, 'Fokus se vrátí na tlačítko');
+
+  // Accessible names follow the interface language
+  document.getElementById('langToggleBtn').click();
+  assert.strictEqual(document.getElementById('themeToggleBtn').getAttribute('aria-label'), 'Toggle dark / light mode');
+  assert.strictEqual(document.getElementById('closeSmartPasteBtn').getAttribute('aria-label'), 'Close');
+});
+
 runAllTests().then(() => {
   console.log('\n========================================');
   console.log(`VÝSLEDEK BATERIE GUI TESTŮ: ${passedTests} úspěšných, ${failedTests} chyb`);

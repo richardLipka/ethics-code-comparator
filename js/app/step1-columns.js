@@ -198,7 +198,7 @@
     const esc = ComparatorEngine.escapeHtml;
     const cols = state.mappings.targetCols || [];
     if (cols.length === 0) {
-      elements.selectedDirectLangsList.innerHTML = `<span style="color:var(--text-muted); font-size:0.85rem; font-style:italic;">${esc(t('noLangsSelectedYet'))}</span>`;
+      elements.selectedDirectLangsList.innerHTML = `<span class="empty-hint">${esc(t('noLangsSelectedYet'))}</span>`;
       return;
     }
     elements.selectedDirectLangsList.innerHTML = '';
@@ -345,8 +345,9 @@
       tr.className = used ? 'lang-row-used' : (owner ? 'lang-row-paired' : 'lang-row-ignored');
       tr.setAttribute('data-col', h);
 
-      let html = `<td><input type="checkbox" class="lang-use-cb" ${used ? 'checked' : ''} ${owner ? 'disabled' : ''}></td>`;
-      html += `<td class="lang-col-name" title="${esc(firstSampleText(h))}">${esc(columnDisplayName(h))}</td>`;
+      const colName = columnDisplayName(h);
+      let html = `<td><input type="checkbox" class="lang-use-cb" ${used ? 'checked' : ''} ${owner ? 'disabled' : ''} aria-label="${esc(t('thUse') + ': ' + colName)}"></td>`;
+      html += `<td class="lang-col-name" title="${esc(firstSampleText(h))}">${esc(colName)}</td>`;
 
       if (used) {
         const cfg = ensureLanguageConfig(h);
@@ -354,13 +355,13 @@
           return c !== h && c !== m.refOldCol && c !== m.refNewCol && m.targetCols.indexOf(c) === -1 &&
             (!newColumnOwner(c) || newColumnOwner(c) === h);
         });
-        html += `<td><input type="text" class="form-input lang-label-input" value="${esc(languageLabel(h))}"></td>`;
-        html += '<td><div class="new-col-cell"><select class="form-select lang-newcol-select">' +
+        html += `<td><input type="text" class="form-input lang-label-input" value="${esc(languageLabel(h))}" aria-label="${esc(t('thLanguage') + ': ' + colName)}"></td>`;
+        html += `<td><div class="new-col-cell"><select class="form-select lang-newcol-select" aria-label="${esc(t('thNewVersion') + ': ' + colName)}">` +
           `<option value="">${esc(t('optCreateNewCol'))}</option>` +
           candidates.map(function (c) {
             return `<option value="${esc(c)}" ${cfg.newCol === c ? 'selected' : ''}>${esc(columnDisplayName(c))}</option>`;
           }).join('') + '</select>' +
-          (cfg.newCol ? '' : `<input type="text" class="form-input lang-newname-input" value="${esc(cfg.newColName || '')}" placeholder="${esc(defaultNewColNameFor(h))}" title="${esc(t('newColNamePlaceholder'))}">`) +
+          (cfg.newCol ? '' : `<input type="text" class="form-input lang-newname-input" value="${esc(cfg.newColName || '')}" placeholder="${esc(defaultNewColNameFor(h))}" title="${esc(t('newColNamePlaceholder'))}" aria-label="${esc(t('newColNamePlaceholder') + ': ' + colName)}">`) +
           '</div></td>';
       } else if (owner) {
         html += `<td colspan="2">${esc(t('usedAsNewVersionOf', { LANG: languageLabel(owner) }))}</td>`;
@@ -405,10 +406,11 @@
       tr.className = 'lang-row-used lang-row-new';
       tr.setAttribute('data-col', newColId);
 
-      let html = '<td><input type="checkbox" class="lang-use-cb" checked></td>';
-      html += `<td class="lang-col-name">${esc(languageLabel(newColId))} <span class="badge badge-info" style="font-size:0.7rem; padding:0.15rem 0.4rem; vertical-align:middle;">${esc(t('badgeNewLanguage'))}</span><small style="display:block; color:var(--text-muted); font-size:0.75rem;">${esc(t('noOldVersion'))}</small></td>`;
-      html += `<td><input type="text" class="form-input lang-label-input" value="${esc(languageLabel(newColId))}"></td>`;
-      html += `<td><div class="new-col-cell"><input type="text" class="form-input lang-newname-input" value="${esc(cfg.newColName || '')}" placeholder="${esc(languageLabel(newColId))}" title="${esc(t('newColNamePlaceholder'))}"><button type="button" class="btn btn-sm btn-outline remove-lang-btn" data-col="${esc(newColId)}" title="${esc(t('removeLangTitle'))}" style="color:#ef4444; border-color:var(--border-color); padding:0.3rem 0.6rem;">✕</button></div></td>`;
+      const langName = languageLabel(newColId);
+      let html = `<td><input type="checkbox" class="lang-use-cb" checked aria-label="${esc(t('thUse') + ': ' + langName)}"></td>`;
+      html += `<td class="lang-col-name">${esc(languageLabel(newColId))} <span class="badge badge-info badge-sm">${esc(t('badgeNewLanguage'))}</span><small class="small-note">${esc(t('noOldVersion'))}</small></td>`;
+      html += `<td><input type="text" class="form-input lang-label-input" value="${esc(langName)}" aria-label="${esc(t('thLanguage') + ': ' + langName)}"></td>`;
+      html += `<td><div class="new-col-cell"><input type="text" class="form-input lang-newname-input" value="${esc(cfg.newColName || '')}" placeholder="${esc(langName)}" title="${esc(t('newColNamePlaceholder'))}" aria-label="${esc(t('newColNamePlaceholder') + ': ' + langName)}"><button type="button" class="btn btn-sm btn-outline remove-lang-btn" data-col="${esc(newColId)}" title="${esc(t('removeLangTitle'))}" aria-label="${esc(t('removeLangTitle') + ': ' + langName)}">✕</button></div></td>`;
 
       tr.innerHTML = html;
       tbody.appendChild(tr);

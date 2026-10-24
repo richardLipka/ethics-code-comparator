@@ -33,6 +33,8 @@
       themeDark: '🌙',
       themeLight: '☀️',
       themeToggleTitle: 'Přepnout tmavý / světlý režim',
+      ariaStepper: 'Kroky průvodce',
+      ariaClose: 'Zavřít',
       langToggle: '🇬🇧 English',
 
       // Stepper
@@ -352,6 +354,8 @@
       themeDark: '🌙',
       themeLight: '☀️',
       themeToggleTitle: 'Toggle dark / light mode',
+      ariaStepper: 'Wizard steps',
+      ariaClose: 'Close',
       langToggle: '🇨🇿 Čeština',
 
       // Stepper

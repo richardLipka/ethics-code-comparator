@@ -16,7 +16,7 @@
    */
   function renderTargetDiffHtml(stub) {
     const hint = function (key) {
-      return `<span style="color:var(--text-muted); font-style:italic;">${t(key)}</span>`;
+      return `<span class="placeholder-text">${t(key)}</span>`;
     };
     if (!String(stub.targetNew || '').trim() && stub.classification !== 'REMOVED') {
       return hint('targetNotTranslatedYet');
@@ -28,7 +28,7 @@
   function renderArticleCards() {
     const col = state.activeTargetCol;
     if (!col || !state.translations[col]) {
-      elements.articlesContainer.innerHTML = '<div style="padding:2rem; text-align:center; color:var(--text-muted);">' + t('noTargetLang') + '</div>';
+      elements.articlesContainer.innerHTML = '<div class="empty-state">' + t('noTargetLang') + '</div>';
       return;
     }
 
@@ -82,13 +82,13 @@
         const auxText = (auxStub && auxStub.targetNew) ? auxStub.targetNew : (auxStub ? auxStub.targetOld : (state.rows[idx] ? state.rows[idx][auxCol] : ''));
         let auxBadge = '';
         if (auxStub && auxStub.isVerified) {
-          auxBadge = `<span class="badge badge-success" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('markVerified')}</span>`;
+          auxBadge = `<span class="badge badge-verified badge-sm">${t('markVerified')}</span>`;
         } else if (auxStub && auxStub.targetNew && auxStub.targetNew !== auxStub.targetOld) {
-          auxBadge = `<span class="badge badge-warning" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('statusDraft')}</span>`;
+          auxBadge = `<span class="badge badge-modified badge-sm">${t('statusDraft')}</span>`;
         } else if (auxStub && auxStub.classification === 'UNCHANGED') {
-          auxBadge = `<span class="badge badge-neutral" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('badgeUnchanged')}</span>`;
+          auxBadge = `<span class="badge badge-unchanged badge-sm">${t('badgeUnchanged')}</span>`;
         } else if (auxText) {
-          auxBadge = `<span class="badge badge-neutral" style="font-size:0.7rem; padding:0.15rem 0.4rem;">${t('statusOriginal')}</span>`;
+          auxBadge = `<span class="badge badge-unchanged badge-sm">${t('statusOriginal')}</span>`;
         }
 
         colAuxHtml = `
@@ -97,9 +97,9 @@
               <span>🌐 ${t('cardAuxPanelTitle', { LANG: auxLabel })}</span>
               ${auxBadge}
             </div>
-            <div class="diff-box aux-diff-box">${esc(auxText) || `<span style="color:var(--text-muted); font-style:italic;">${t('emptyCell')}</span>`}</div>
+            <div class="diff-box aux-diff-box">${esc(auxText) || `<span class="placeholder-text">${t('emptyCell')}</span>`}</div>
             ${auxText ? `
-            <div class="editor-toolbar" style="margin-top:0.35rem; justify-content:flex-end;">
+            <div class="editor-toolbar editor-toolbar-end">
               <button class="btn btn-sm btn-outline copy-aux-btn" data-index="${idx}" title="${t('copyAuxTitle')}">
                 📋 ${t('copyAuxBtn')}
               </button>
@@ -114,7 +114,7 @@
           <div class="sub-panel-title">
             <span>${t('cardTargetOldTitle', { LANG: langLabel })}</span>
           </div>
-          <div class="diff-box" style="background-color:var(--bg-tertiary); color:var(--text-secondary);">${ComparatorEngine.escapeHtml(stub.targetOld) || `<span style="color:var(--text-muted); font-style:italic;">${t('emptyOriginalText')}</span>`}</div>
+          <div class="diff-box diff-box-old">${ComparatorEngine.escapeHtml(stub.targetOld) || `<span class="placeholder-text">${t('emptyOriginalText')}</span>`}</div>
         </div>
       `;
 
@@ -161,8 +161,8 @@
             ${renderBadgeHtml(classification)}
           </div>
           <div>
-            <label style="display:inline-flex; align-items:center; gap:0.4rem; cursor:pointer; font-size:0.85rem; font-weight:600; color:${stub.isVerified ? '#047857' : 'var(--text-muted)'};">
-              <input type="checkbox" class="verify-checkbox" data-index="${idx}" ${stub.isVerified ? 'checked' : ''} style="accent-color:#10b981; width:16px; height:16px;">
+            <label class="verify-label${stub.isVerified ? ' is-verified' : ''}">
+              <input type="checkbox" class="verify-checkbox" data-index="${idx}" ${stub.isVerified ? 'checked' : ''}>
               <span>${stub.isVerified ? t('markVerified') : t('markToVerify')}</span>
             </label>
           </div>
@@ -177,9 +177,9 @@
         <div class="sub-panel">
           <div class="sub-panel-title">
             <span>${refTitle}</span>
-            ${(!hasOldRef || isDirect) ? '' : (refDiffRes.stats.hasChanges ? `<span style="font-size:0.75rem; color:#b45309; font-weight:600;">${t('changePct', { PCT: Math.round((1 - refDiffRes.stats.similarity) * 100) })}</span>` : `<span style="font-size:0.75rem; color:#15803d; font-weight:600;">${t('match100')}</span>`)}
+            ${(!hasOldRef || isDirect) ? '' : (refDiffRes.stats.hasChanges ? `<span class="change-pct">${t('changePct', { PCT: Math.round((1 - refDiffRes.stats.similarity) * 100) })}</span>` : `<span class="change-pct change-none">${t('match100')}</span>`)}
           </div>
-          <div class="diff-box">${((!hasOldRef || isDirect) ? ComparatorEngine.escapeHtml(stub.refNew) : refDiffHtml) || `<span style="color:var(--text-muted);">${t('emptyCell')}</span>`}</div>
+          <div class="diff-box">${((!hasOldRef || isDirect) ? ComparatorEngine.escapeHtml(stub.refNew) : refDiffHtml) || `<span class="text-muted">${t('emptyCell')}</span>`}</div>
         </div>
       `;
 
@@ -204,7 +204,7 @@
     });
 
     if (renderedCount === 0) {
-      elements.articlesContainer.innerHTML = '<div style="padding:3rem; text-align:center; color:var(--text-muted); background:var(--bg-secondary); border-radius:var(--radius-lg); border:1px solid var(--border-color);">' + t('noArticlesMatch') + '</div>';
+      elements.articlesContainer.innerHTML = '<div class="empty-state empty-state-card">' + t('noArticlesMatch') + '</div>';
     }
 
     attachCardEventListeners();

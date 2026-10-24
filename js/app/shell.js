@@ -66,6 +66,14 @@
       }
     });
 
+    // Update accessible names with data-i18n-aria-label
+    document.querySelectorAll('[data-i18n-aria-label]').forEach(function (el) {
+      const key = el.getAttribute('data-i18n-aria-label');
+      if (key) {
+        el.setAttribute('aria-label', t(key));
+      }
+    });
+
     // Update theme toggle button text
     elements.themeToggleBtn.textContent = state.theme === 'dark' ? t('themeLight') : t('themeDark');
 
@@ -158,8 +166,10 @@
     [elements.stepNav1, elements.stepNav2, elements.stepNav3, elements.stepNav4].forEach(function (nav, idx) {
       if (idx + 1 === stepNumber) {
         nav.classList.add('active');
+        nav.setAttribute('aria-current', 'step');
       } else {
         nav.classList.remove('active');
+        nav.removeAttribute('aria-current');
       }
     });
 
@@ -200,18 +210,57 @@
   /**
    * Close the top-most open modal with Escape or a click on its backdrop.
    */
+  const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), ' +
+    'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+  function focusableIn(container) {
+    return Array.prototype.filter.call(container.querySelectorAll(FOCUSABLE), function (el) {
+      return el.offsetParent !== null || el === document.activeElement;
+    });
+  }
+
+  /**
+   * Modals: click on the backdrop and Escape close them; while open, keyboard focus moves into the
+   * modal and stays there (Tab cycles), and returns to the control that opened it when it closes.
+   */
   function initModalDismissal() {
     document.querySelectorAll('.modal-overlay').forEach(function (overlay) {
       overlay.addEventListener('click', function (e) {
         if (e.target === overlay) overlay.classList.remove('open');
       });
+      let returnFocusTo = null;
+      new MutationObserver(function () {
+        const isOpen = overlay.classList.contains('open');
+        if (isOpen && !returnFocusTo) {
+          returnFocusTo = document.activeElement;
+          const first = overlay.querySelector('textarea:not([readonly]), input:not([type="hidden"]), select') || focusableIn(overlay)[0];
+          if (first && typeof first.focus === 'function') first.focus();
+        } else if (!isOpen && returnFocusTo) {
+          const target = returnFocusTo;
+          returnFocusTo = null;
+          if (target && typeof target.focus === 'function' && document.contains(target)) target.focus();
+        }
+      }).observe(overlay, { attributes: true, attributeFilter: ['class'] });
     });
     document.addEventListener('keydown', function (e) {
-      if (e.key !== 'Escape') return;
       const open = document.querySelectorAll('.modal-overlay.open');
-      if (open.length > 0) {
-        open[open.length - 1].classList.remove('open');
+      if (open.length === 0) return;
+      const top = open[open.length - 1];
+      if (e.key === 'Escape') {
+        top.classList.remove('open');
         e.preventDefault();
+      } else if (e.key === 'Tab') {
+        const items = focusableIn(top);
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        if (e.shiftKey && (document.activeElement === first || !top.contains(document.activeElement))) {
+          last.focus();
+          e.preventDefault();
+        } else if (!e.shiftKey && (document.activeElement === last || !top.contains(document.activeElement))) {
+          first.focus();
+          e.preventDefault();
+        }
       }
     });
   }

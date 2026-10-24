@@ -27,7 +27,7 @@
   }
 
   function runBrowserTests() {
-    elements.diagnosticsLog.innerHTML = `<div style="color:var(--text-muted);">${I18n.getLanguage() === 'en' ? 'Running diagnostic suite...' : 'Spouštím interní diagnostickou sadu...'}</div>`;
+    elements.diagnosticsLog.innerHTML = `<div class="text-muted">${I18n.getLanguage() === 'en' ? 'Running diagnostic suite...' : 'Spouštím interní diagnostickou sadu...'}</div>`;
 
     setTimeout(function () {
       const logs = [];
@@ -36,20 +36,20 @@
 
       function assertEq(name, actual, expected) {
         if (actual === expected) {
-          logs.push(`<div style="color:#15803d; font-weight:600;">✓ ${ComparatorEngine.escapeHtml(name)}</div>`);
+          logs.push(`<div class="diag-pass">✓ ${ComparatorEngine.escapeHtml(name)}</div>`);
           pass++;
         } else {
-          logs.push(`<div style="color:#b91c1c; font-weight:bold;">✗ ${ComparatorEngine.escapeHtml(name)}<br><small style="color:var(--text-muted); padding-left:1.5rem;">Expected: ${expected}, Got: ${actual}</small></div>`);
+          logs.push(`<div class="diag-fail">✗ ${ComparatorEngine.escapeHtml(name)}<br><small class="diag-detail">Expected: ${ComparatorEngine.escapeHtml(String(expected))}, Got: ${ComparatorEngine.escapeHtml(String(actual))}</small></div>`);
           fail++;
         }
       }
 
       function assertOk(name, cond, details) {
         if (cond) {
-          logs.push(`<div style="color:#15803d; font-weight:600;">✓ ${ComparatorEngine.escapeHtml(name)}</div>`);
+          logs.push(`<div class="diag-pass">✓ ${ComparatorEngine.escapeHtml(name)}</div>`);
           pass++;
         } else {
-          logs.push(`<div style="color:#b91c1c; font-weight:bold;">✗ ${ComparatorEngine.escapeHtml(name)} ${details ? '<br><small>' + details + '</small>' : ''}</div>`);
+          logs.push(`<div class="diag-fail">✗ ${ComparatorEngine.escapeHtml(name)} ${details ? '<br><small class="diag-detail">' + ComparatorEngine.escapeHtml(String(details)) + '</small>' : ''}</div>`);
           fail++;
         }
       }
@@ -100,8 +100,8 @@
       assertOk('clean export leaves out removed paragraphs', exportData.data.length < sampleRows.length);
 
       const summaryHtml = `
-        <div style="padding:0.75rem; background:var(--bg-tertiary); border-radius:var(--radius-md); margin-bottom:1rem; font-weight:700;">
-          ${I18n.getLanguage() === 'en' ? 'Diagnostics Result:' : 'Výsledek diagnostiky:'} <span style="color:#15803d;">${pass} ${I18n.getLanguage() === 'en' ? 'passed' : 'úspěšných'}</span>, <span style="color:${fail > 0 ? '#b91c1c' : '#15803d'};">${fail} ${I18n.getLanguage() === 'en' ? 'failed' : 'chyb'}</span>
+        <div class="diag-summary">
+          ${I18n.getLanguage() === 'en' ? 'Diagnostics Result:' : 'Výsledek diagnostiky:'} <span class="diag-pass">${pass} ${I18n.getLanguage() === 'en' ? 'passed' : 'úspěšných'}</span>, <span class="${fail > 0 ? 'diag-fail' : 'diag-pass'}">${fail} ${I18n.getLanguage() === 'en' ? 'failed' : 'chyb'}</span>
         </div>
       `;
 

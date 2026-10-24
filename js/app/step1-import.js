@@ -29,6 +29,14 @@
       e.target.value = '';
     });
 
+    // The upload area is a button for keyboard users too
+    elements.dropzone.addEventListener('keydown', function (e) {
+      if (e.target === elements.dropzone && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        elements.dropzone.click();
+      }
+    });
+
     elements.dropzone.addEventListener('dragover', function (e) {
       e.preventDefault();
       elements.dropzone.classList.add('dragover');
@@ -259,29 +267,27 @@
     }
 
     const esc = ComparatorEngine.escapeHtml;
-    const thStyle = 'padding:0.5rem 0.75rem; font-size:0.8rem; background:var(--bg-tertiary); border:1px solid var(--border-color);';
     elements.previewTableHead.innerHTML = '<tr>' +
-      `<th style="${thStyle}" title="${esc(t('previewSkipTitle'))}">${esc(t('previewSkipCol'))}</th>` +
-      `<th style="${thStyle}">${esc(t('rowLabel'))}</th>` +
+      `<th title="${esc(t('previewSkipTitle'))}">${esc(t('previewSkipCol'))}</th>` +
+      `<th>${esc(t('rowLabel'))}</th>` +
       state.headers.map(function (h) {
-        return `<th style="${thStyle}">${esc(columnDisplayName(h))}</th>`;
+        return `<th>${esc(columnDisplayName(h))}</th>`;
       }).join('') + '</tr>';
 
     // Whitespace is collapsed so long single-line cells stay readable
-    const tdStyle = 'padding:0.45rem 0.75rem; font-size:0.8rem; border:1px solid var(--border-color); color:var(--text-secondary); max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
     const limit = state.previewLimit || PREVIEW_INITIAL_ROWS;
     elements.previewTableBody.innerHTML = entries.slice(0, limit).map(function (e) {
       const cells = state.headers.map(function (h) {
         let val = e.row[h] !== undefined ? String(e.row[h]).replace(/\s+/g, ' ').trim() : '';
         const full = val;
         if (val.length > 60) val = val.substring(0, 57) + '...';
-        return `<td style="${tdStyle}" title="${esc(full.slice(0, 500))}">${esc(val)}</td>`;
+        return `<td title="${esc(full.slice(0, 500))}">${esc(val)}</td>`;
       }).join('');
       const skipTitle = e.auto ? t('previewEmptyRow') : t('previewSkipTitle');
       return `<tr class="preview-row${e.skipped ? ' preview-row-skipped' : ''}" data-row="${e.rowNumber}">` +
-        `<td style="${tdStyle} text-align:center;"><input type="checkbox" class="preview-skip-cb" data-row="${e.rowNumber}"` +
+        `<td class="cell-center"><input type="checkbox" class="preview-skip-cb" data-row="${e.rowNumber}"` +
         `${e.skipped ? ' checked' : ''}${e.auto ? ' disabled' : ''} title="${esc(skipTitle)}" aria-label="${esc(t('previewSkipCol'))} ${e.rowNumber}"></td>` +
-        `<td style="${tdStyle} font-family:var(--font-mono);">${e.rowNumber}${e.auto ? ` <span class="preview-empty-badge">${esc(t('previewEmptyRow'))}</span>` : ''}</td>` +
+        `<td class="mono">${e.rowNumber}${e.auto ? ` <span class="preview-empty-badge">${esc(t('previewEmptyRow'))}</span>` : ''}</td>` +
         cells + '</tr>';
     }).join('');
 

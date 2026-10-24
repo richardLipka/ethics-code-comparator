@@ -76,9 +76,10 @@ npm test
 ```
 
 - **Jádro a adaptéry (56 testů):** `npm run test:unit` – klasifikace a diff, pracovní data jazyků (včetně existujících sloupců nové verze), prompty (překlad i ověření), Smart Paste, exporty tabulek (zapsané do `.xlsx` a načtené zpět), soubor projektu, shrnutí změn a dokument pro tisk, registry adaptérů (výchozí formáty, registrace nových), Excel importér (CSV ve Windows-1250, data), Word importér na skutečných souborech Wordu (`test/fixtures`), import vyplněného částečného sešitu, úplnost a obecnost lokalizace.
-- **GUI v jsdom (48 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, pomocný referenční jazyk, ověření překladu, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu, import překladů ze sešitu.
+- **GUI v jsdom (50 testů):** `npm run test:gui` – testy klikají na skutečné ovládací prvky a čtou stažené soubory: výběr sloupců, nahrání `.xlsx`/`.csv` (bez záhlaví, s mezerami v buňkách, s existujícím sloupcem nové verze), studio, pomocný referenční jazyk, ověření překladu, uložení a načtení projektu, autosave (i pod původním názvem), exporty a tisk, nový importér a exportér zaregistrovaný za běhu, import překladů ze sešitu, přístupnost (audit [axe-core](https://github.com/dequelabs/axe-core) všech kroků a dialogů, ovládání klávesnicí, fokus v dialozích).
 - **E2E (5 testů):** `npm run test:e2e` – celé průchody Kroky 1–4 pro vícejazyčný Excel, Word, text a jednosloupcový Excel.
-- Testy běží automaticky na GitHubu při každém push a pull requestu (`.github/workflows/test.yml`).
+- **Kontrola kódu:** `npm run lint` (ESLint) a `npm run typecheck` (typová kontrola jádra a adaptérů podle JSDoc přes TypeScript).
+- Kontrola kódu i testy běží automaticky na GitHubu při každém push a pull requestu (`.github/workflows/test.yml`).
 
 V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlížeči.
 
@@ -89,8 +90,20 @@ V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlíže
 ```
 ├── index.html                 # Rozhraní (kroky 1–4, modální okna)
 ├── serve.js                   # Lokální HTTP server
-├── css/app.css                # Styly (světlý/tmavý režim, responzivní rozvržení)
-├── js/app.js                  # Řízení rozhraní a workflow
+├── css/app.css                # Styly (světlý/tmavý režim, responzivní rozvržení; barvy splňují kontrast WCAG AA)
+├── js/app/                    # Řízení rozhraní a workflow (sdílený jmenný prostor App, pořadí načtení v index.html)
+│   ├── core.js                # Stav, odkazy na prvky stránky, překlady, notifikace, autosave, společné funkce
+│   ├── shell.js               # Jazyk rozhraní, motiv, navigace mezi kroky, dialogy
+│   ├── project.js             # Soubor projektu, obnovení autosave, nový projekt
+│   ├── step1-import.js        # Krok 1: načtení souboru, list, náhled a přeskočené řádky
+│   ├── step1-columns.js       # Krok 1: výběr sloupců a jazyků
+│   ├── step2-reference.js     # Krok 2: změny reference
+│   ├── step3-studio.js        # Krok 3: postup, jazyky, filtry, navigace
+│   ├── step3-cards.js         # Krok 3: karty odstavců, editor, prompty
+│   ├── step3-batch.js         # Krok 3: hromadný prompt, Smart Paste, import překladů ze sešitu
+│   ├── step4-export.js        # Krok 4: exporty a jejich nastavení
+│   ├── settings.js            # Šablona promptu, diagnostika
+│   └── main.js                # Spuštění aplikace
 ├── js/core/
 │   ├── comparator-engine.js   # Diff, klasifikace, pracovní data, prompty, Smart Paste, modely exportů
 │   ├── storage.js             # Autosave, soubor projektu (.json)
@@ -99,6 +112,8 @@ V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlíže
 ├── js/io/                     # Adaptéry importu a exportu
 │   ├── importers.js           # Registr importérů a model tabulky
 │   ├── excel-importer.js      # Výchozí importér: Excel / OpenDocument / CSV
+│   ├── word-importer.js       # Word: .docx, .doc, .rtf
+│   ├── text-importer.js       # Text: .txt
 │   ├── exporters.js           # Registr exportérů, stahování a tisk
 │   ├── excel-exporter.js      # Výchozí export tabulek: Excel (.xlsx)
 │   ├── html-document-exporter.js  # Dokument pro tisk / HTML
@@ -106,7 +121,8 @@ V aplikaci je také tlačítko 🧪 s interní diagnostikou přímo v prohlíže
 ├── docs/ADAPTERS.md           # Jak napsat vlastní importér / exportér
 ├── lib/                       # SheetJS a jsdiff (vlastní licence)
 ├── sample/                    # Ukázkový sešit a skript pro jeho vytvoření
-├── test/                      # Testy jádra a GUI
+├── test/                      # Testy jádra, GUI a E2E; test/fixtures: skutečné soubory Wordu a Excelu
+├── eslint.config.js, jsconfig.json  # Kontrola kódu (ESLint, typová kontrola)
 ├── LICENSE                    # Licence MIT
 └── THIRD_PARTY_NOTICES.md     # Licence přibalených knihoven
 ```

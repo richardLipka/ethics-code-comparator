@@ -131,6 +131,7 @@
     if (elements.filterChipsContainer) {
       elements.filterChipsContainer.querySelectorAll('.filter-chip').forEach(function (c) {
         c.classList.toggle('active', c.getAttribute('data-status') === 'all');
+        c.setAttribute('aria-pressed', String(c.getAttribute('data-status') === 'all'));
       });
     }
   }

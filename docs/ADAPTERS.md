@@ -1,7 +1,7 @@
 # Import and export adapters
 
 Internationalisation Manager reads and writes files only through **adapters**. The application
-(`js/app.js`) and the engine (`js/core/comparator-engine.js`) never call a file-format library
+(`js/app/*.js`) and the engine (`js/core/comparator-engine.js`) never call a file-format library
 directly, so a new format is added by writing one adapter file and listing it in `index.html` –
 no other code has to change.
 
@@ -17,7 +17,7 @@ no other code has to change.
 
 All modules are plain browser scripts (no build step) that also work as Node modules for the
 tests. Each adapter file registers itself when it is loaded; load it after `js/io/importers.js` or
-`js/io/exporters.js` and before `js/app.js`.
+`js/io/exporters.js` and before `js/app/core.js`.
 
 ## Import adapters
 

@@ -122,7 +122,7 @@
         if (parsed.length === 0) {
           elements.smartPasteMatchesContainer.style.display = 'block';
           elements.smartPasteMatchesTitle.textContent = '';
-          elements.smartPasteMatchesList.innerHTML = `<span style="color:var(--text-muted); font-size:0.85rem;">${t('smartPasteNoMatches')}</span>` + unmatchedHtml;
+          elements.smartPasteMatchesList.innerHTML = `<span class="empty-hint">${t('smartPasteNoMatches')}</span>` + unmatchedHtml;
           elements.smartPasteApplyBtn.disabled = true;
           return;
         }
