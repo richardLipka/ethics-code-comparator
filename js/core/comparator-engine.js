@@ -251,17 +251,31 @@
   }
 
   /**
+   * Helper to check if a language was added newly and has no old version column.
+   */
+  function isNewLanguage(mappings, col) {
+    if (!col) return false;
+    const languages = (mappings && mappings.languages) || {};
+    const info = languages[col];
+    if (info && info.isNewLanguage) return true;
+    if (typeof col === 'string' && col.indexOf('__new__') === 0) return true;
+    return false;
+  }
+
+  /**
    * Settings of one language (keyed by its old-version column).
    * newCol: an existing column with the new version ('' = a new column is created on export).
    */
   function getLanguageInfo(mappings, col) {
     const languages = (mappings && mappings.languages) || {};
     const info = languages[col] || {};
+    const isNew = isNewLanguage(mappings, col);
     return {
       col: col,
-      label: info.label || col,
+      label: info.label || (isNew ? (info.newColName || String(col).replace(/^__new__/, '')) : col),
       newCol: info.newCol || '',
-      newColName: info.newColName || defaultNewColName(col, mappings && mappings.refOldCol, mappings && mappings.refNewCol)
+      newColName: info.newColName || defaultNewColName(col, mappings && mappings.refOldCol, mappings && mappings.refNewCol),
+      isNewLanguage: isNew
     };
   }
 
@@ -277,19 +291,22 @@
    * Generate initial translation stub for a target language.
    *
    * @param {Array<Object>} rows - All table rows
-   * @param {string} targetCol - Column with the old version of the language
+   * @param {string} targetCol - Column with the old version of the language (or ID of new language)
    * @param {string} refOldCol - Reference column, old version
    * @param {string} refNewCol - Reference column, new version
    * @param {string} [newCol] - Existing column that already holds (part of) the new version
+   * @param {boolean} [isNewLang] - True if this is a newly created language with no old version
    * @returns {Array<Object>} Stubs for each row
    */
-  function generateTargetStub(rows, targetCol, refOldCol, refNewCol, newCol) {
+  function generateTargetStub(rows, targetCol, refOldCol, refNewCol, newCol, isNewLang) {
     if (!rows || !Array.isArray(rows)) return [];
+
+    const isPureNew = isNewLang !== undefined ? !!isNewLang : (typeof targetCol === 'string' && targetCol.indexOf('__new__') === 0);
 
     return rows.map(function (row, idx) {
       const refOld = row[refOldCol];
       const refNew = row[refNewCol];
-      const targetOld = row[targetCol] !== undefined && row[targetCol] !== null ? String(row[targetCol]) : '';
+      const targetOld = (!isPureNew && row[targetCol] !== undefined && row[targetCol] !== null) ? String(row[targetCol]) : '';
       const existingNew = newCol && row[newCol] !== undefined && row[newCol] !== null ? String(row[newCol]) : '';
       const classification = classifyRow(refOld, refNew);
 
@@ -297,44 +314,65 @@
       let status = 'pending';
       let isVerified = false;
 
-      switch (classification) {
-        case 'UNCHANGED':
-          // Auto-copy the approved old translation
-          initialNewText = targetOld;
-          status = 'auto_copied';
-          isVerified = true;
-          break;
+      if (isPureNew) {
+        // Purely new languages have no old translation to carry over
+        switch (classification) {
+          case 'REMOVED':
+          case 'EMPTY':
+            initialNewText = '';
+            status = 'removed';
+            isVerified = true;
+            break;
 
-        case 'REMOVED':
-          initialNewText = '';
-          status = 'removed';
-          isVerified = true;
-          break;
+          case 'UNCHANGED':
+          case 'MODIFIED':
+          case 'ADDED':
+          default:
+            initialNewText = '';
+            status = 'pending_translation';
+            isVerified = false;
+            break;
+        }
+      } else {
+        switch (classification) {
+          case 'UNCHANGED':
+            // Auto-copy the approved old translation
+            initialNewText = targetOld;
+            status = 'auto_copied';
+            isVerified = true;
+            break;
 
-        case 'ADDED':
-          initialNewText = '';
-          status = 'pending_translation';
-          isVerified = false;
-          break;
+          case 'REMOVED':
+            initialNewText = '';
+            status = 'removed';
+            isVerified = true;
+            break;
 
-        case 'MODIFIED':
-          initialNewText = '';
-          status = 'pending_review';
-          isVerified = false;
-          break;
+          case 'ADDED':
+            initialNewText = '';
+            status = 'pending_translation';
+            isVerified = false;
+            break;
 
-        case 'EMPTY':
-        default:
-          initialNewText = '';
-          status = 'empty';
-          isVerified = true;
-          break;
+          case 'MODIFIED':
+            initialNewText = '';
+            status = 'pending_review';
+            isVerified = false;
+            break;
+
+          case 'EMPTY':
+          default:
+            initialNewText = '';
+            status = 'empty';
+            isVerified = true;
+            break;
+        }
       }
 
       // Text already present in the new-version column of the sheet wins, but has to be reviewed
       // unless it is simply the unchanged old translation
       if (existingNew.trim()) {
-        const sameAsAuto = classification === 'UNCHANGED' && existingNew === targetOld;
+        const sameAsAuto = !isPureNew && classification === 'UNCHANGED' && existingNew === targetOld;
         initialNewText = existingNew;
         if (!sameAsAuto) {
           status = 'imported';
@@ -352,6 +390,7 @@
         targetNew: initialNewText,
         status: status,
         isVerified: isVerified,
+        isNewLanguage: isPureNew,
         notes: ''
       };
     });
@@ -409,6 +448,25 @@
     }
 
     if (lang === 'en') {
+      if (params.isNewLanguage) {
+        const lines = [
+          'You are an experienced professional translator.',
+          'TASK: Translate the text into language: ' + targetLang + '.',
+          'Paragraph: ' + rowId,
+          '',
+          'INSTRUCTIONS:',
+          '1. Translate faithfully, maintaining a natural style and professional terminology in ' + targetLang + '.',
+          '2. Output ONLY the translated text (no introduction, comments, quotes or markdown).',
+          '',
+          '=== REFERENCE TEXT (' + refLang + ') ===',
+          refNew
+        ];
+        if (auxLang && auxText) {
+          lines.push('', '=== AUXILIARY TRANSLATION FOR REFERENCE (' + auxLang + ') ===', auxText);
+        }
+        return lines.join('\n');
+      }
+
       if (classification === 'ADDED') {
         const lines = [
           'You are an experienced professional translator.',
@@ -454,6 +512,25 @@
     }
 
     // Czech default
+    if (params.isNewLanguage) {
+      const lines = [
+        'Jste zkušený odborný překladatel.',
+        'ÚKOL: Přeložte text do jazyka: ' + targetLang + '.',
+        'Odstavec: ' + rowId,
+        '',
+        'POKYNY:',
+        '1. Přeložte text věrně a dodržte přirozený styl a odbornou terminologii v jazyce ' + targetLang + '.',
+        '2. POUZE vraťte přeložený text – bez úvodu, komentářů, uvozovek a markdownu.',
+        '',
+        '=== REFERENČNÍ TEXT (' + refLang + ') ===',
+        refNew
+      ];
+      if (auxLang && auxText) {
+        lines.push('', '=== POMOCNÝ PŘEKLAD PRO POROVNÁNÍ (' + auxLang + ') ===', auxText);
+      }
+      return lines.join('\n');
+    }
+
     if (classification === 'ADDED') {
       const lines = [
         'Jste zkušený odborný překladatel.',
@@ -623,8 +700,9 @@
    * generated stubs, so reference texts and the old target text always come from the current rows.
    * Rows whose reference classification changed since the work was saved lose their verification.
    */
-  function rehydrateStubs(rows, savedStubs, targetCol, refOldCol, refNewCol, newCol) {
-    const fresh = generateTargetStub(rows, targetCol, refOldCol, refNewCol, newCol);
+  function rehydrateStubs(rows, savedStubs, targetCol, refOldCol, refNewCol, newCol, isNewLang) {
+    const isPureNew = isNewLang !== undefined ? !!isNewLang : (typeof targetCol === 'string' && targetCol.indexOf('__new__') === 0);
+    const fresh = generateTargetStub(rows, targetCol, refOldCol, refNewCol, newCol, isPureNew);
     if (!Array.isArray(savedStubs)) return fresh;
 
     return fresh.map(function (stub, idx) {
@@ -656,8 +734,9 @@
       existing.every(function (s) { return s && s.targetCol !== undefined; })) {
       return existing;
     }
+    const info = getLanguageInfo(mappings, targetCol);
     return rehydrateStubs(rows, existing, targetCol, mappings.refOldCol, mappings.refNewCol,
-      getLanguageInfo(mappings, targetCol).newCol);
+      info.newCol, info.isNewLanguage);
   }
 
   /**
@@ -696,7 +775,12 @@
     const translations = options.translations || {}; // { [targetCol]: [ { targetNew, status, ... } ] }
     const exportType = options.exportType === 'clean_2026' ? 'clean' : (options.exportType || 'comprehensive');
     const labels = sheetLabels(options.uiLang);
-    const targetCols = (mappings.targetCols || []).filter(function (col) { return headers.indexOf(col) !== -1; });
+    const targetCols = (mappings.targetCols || []).filter(function (col) {
+      return headers.indexOf(col) !== -1 || isNewLanguage(mappings, col);
+    });
+
+    const updatingCols = targetCols.filter(function (col) { return headers.indexOf(col) !== -1; });
+    const newLangCols = targetCols.filter(function (col) { return isNewLanguage(mappings, col) && headers.indexOf(col) === -1; });
 
     const infos = {};
     const stubsByCol = {};
@@ -721,11 +805,11 @@
       const taken = [];
       const sourceCols = []; // [{ from, to }] other columns + reference new version
       headers.forEach(function (h) {
-        if (h === mappings.refOldCol || targetCols.indexOf(h) !== -1 || existingNewCols[h]) return;
+        if (h === mappings.refOldCol || updatingCols.indexOf(h) !== -1 || existingNewCols[h]) return;
         sourceCols.push({ from: h, to: uniqueColName(h, taken) });
       });
       const targetNames = targetCols.map(function (col) {
-        return { col: col, to: uniqueColName(infos[col].newCol || infos[col].newColName, taken) };
+        return { col: col, to: uniqueColName(infos[col].newCol || infos[col].newColName || infos[col].label, taken) };
       });
 
       const cleanHeaders = sourceCols.map(function (c) { return c.to; })
@@ -760,22 +844,29 @@
     const taken = headers.slice();
     const newColNames = {};
     targetCols.forEach(function (col) {
-      newColNames[col] = infos[col].newCol || uniqueColName(infos[col].newColName, taken);
+      newColNames[col] = infos[col].newCol || uniqueColName(infos[col].newColName || infos[col].label, taken);
     });
 
     const compHeaders = [];
     headers.forEach(function (h) {
       compHeaders.push(h);
-      if (targetCols.indexOf(h) !== -1 && !infos[h].newCol) compHeaders.push(newColNames[h]);
+      if (updatingCols.indexOf(h) !== -1 && !infos[h].newCol) compHeaders.push(newColNames[h]);
+    });
+    // Newly added languages get ONLY ONE column, placed at the end
+    newLangCols.forEach(function (col) {
+      compHeaders.push(newColNames[col]);
     });
 
     function processedRow(row, idx) {
       const newRow = {};
       headers.forEach(function (h) {
         newRow[h] = existingNewCols[h] ? translatedText(existingNewCols[h], idx) : cellValue(row[h]);
-        if (targetCols.indexOf(h) !== -1 && !infos[h].newCol) {
+        if (updatingCols.indexOf(h) !== -1 && !infos[h].newCol) {
           newRow[newColNames[h]] = translatedText(h, idx);
         }
+      });
+      newLangCols.forEach(function (col) {
+        newRow[newColNames[col]] = translatedText(col, idx);
       });
       return newRow;
     }
@@ -785,7 +876,10 @@
       const newRow = {};
       headers.forEach(function (h) {
         newRow[h] = cellValue(row[h]);
-        if (targetCols.indexOf(h) !== -1 && !infos[h].newCol) newRow[newColNames[h]] = '';
+        if (updatingCols.indexOf(h) !== -1 && !infos[h].newCol) newRow[newColNames[h]] = '';
+      });
+      newLangCols.forEach(function (col) {
+        newRow[newColNames[col]] = '';
       });
       return newRow;
     }
@@ -873,14 +967,17 @@
     const headers = options.headers || [];
     const mappings = options.mappings || {};
     const labels = sheetLabels(options.uiLang);
-    const langCol = options.langCol;
+    const langCol = options.langCol || options.targetCol;
     const isReference = langCol === mappings.refNewCol;
+    const isPureNew = !isReference && isNewLanguage(mappings, langCol);
     const info = isReference ? null : getLanguageInfo(mappings, langCol);
-    const oldCol = isReference ? mappings.refOldCol : langCol;
+    const oldCol = isReference ? mappings.refOldCol : (isPureNew ? '' : langCol);
     const newColExisting = isReference ? mappings.refNewCol : (info.newCol && headers.indexOf(info.newCol) !== -1 ? info.newCol : '');
     const stubs = isReference ? null : resolveStubs(rows, options.translations || {}, langCol, mappings);
 
-    const targetCols = (mappings.targetCols || []).filter(function (c) { return headers.indexOf(c) !== -1; });
+    const targetCols = (mappings.targetCols || []).filter(function (c) {
+      return headers.indexOf(c) !== -1 || isNewLanguage(mappings, c);
+    });
     const newVersionOwner = {};
     targetCols.forEach(function (c) {
       const inf = getLanguageInfo(mappings, c);
@@ -902,7 +999,7 @@
       seen[key] = true;
       if (entry.newOf) {
         const inf = getLanguageInfo(mappings, entry.newOf);
-        entry.name = inf.newCol && headers.indexOf(inf.newCol) !== -1 ? inf.newCol : inf.newColName;
+        entry.name = inf.newCol && headers.indexOf(inf.newCol) !== -1 ? inf.newCol : (inf.newColName || inf.label);
         entry.stubs = resolveStubs(rows, options.translations || {}, entry.newOf, mappings);
       } else {
         entry.name = entry.col;
@@ -911,9 +1008,14 @@
     });
     const taken = [labels.row];
     const contextNames = context.map(function (e) { return uniqueColName(e.name, taken); });
-    const oldName = uniqueColName(oldCol, taken);
-    const newName = uniqueColName(newColExisting || info.newColName, taken);
+    const oldName = (!isPureNew && oldCol) ? uniqueColName(oldCol, taken) : '';
+    const newName = uniqueColName(newColExisting || (info && (info.newColName || info.label)) || 'New', taken);
     const statusName = isReference ? null : uniqueColName(labels.status, taken);
+
+    const partialHeaders = [labels.row].concat(contextNames);
+    if (oldName) partialHeaders.push(oldName);
+    partialHeaders.push(newName);
+    if (statusName) partialHeaders.push(statusName);
 
     const data = rows.map(function (row, idx) {
       const out = {};
@@ -921,7 +1023,7 @@
       context.forEach(function (e, k) {
         out[contextNames[k]] = e.stubs ? cellValue(e.stubs[idx] && e.stubs[idx].targetNew) : cellValue(row[e.col]);
       });
-      out[oldName] = cellValue(row[oldCol]);
+      if (oldName) out[oldName] = cellValue(row[oldCol]);
       out[newName] = isReference ? cellValue(row[mappings.refNewCol]) : cellValue(stubs[idx] && stubs[idx].targetNew);
       if (statusName) out[statusName] = labels[getStubState(stubs[idx])];
       return out;
@@ -930,7 +1032,7 @@
     const label = isReference ? String(langCol) : info.label;
     return {
       sheetName: String(label).replace(/[\\/?*[\]:]/g, '_').slice(0, 31) || 'Export',
-      headers: [labels.row].concat(contextNames, [oldName, newName], statusName ? [statusName] : []),
+      headers: partialHeaders,
       data: data,
       stubsByCol: stubs ? { [langCol]: stubs } : {}
     };
@@ -970,6 +1072,7 @@
     const lang = params.promptLang || 'cs';
     const targetLang = params.targetLangName || (lang === 'en' ? 'target language' : 'cílový jazyk');
     const refLang = params.refLangName || 'reference';
+    const isNewLang = !!params.isNewLanguage;
     let items = params.items;
     if (!items || items.length === 0) {
       items = [];
@@ -987,7 +1090,11 @@
         const refNew = row[mappings.refNewCol] !== undefined ? String(row[mappings.refNewCol]) : '';
         const classification = stub ? stub.classification : classifyRow(refOld, refNew);
 
-        if (classification === 'MODIFIED' || classification === 'ADDED') {
+        const shouldInclude = isNewLang
+          ? (classification !== 'REMOVED' && classification !== 'EMPTY' && refNew.trim() !== '')
+          : (classification === 'MODIFIED' || classification === 'ADDED');
+
+        if (shouldInclude) {
           const item = {
             index: idx,
             rowId: rowTag(params.rowNumbers, idx),
@@ -1007,40 +1114,56 @@
 
     if (items.length === 0) {
       return lang === 'en'
-        ? 'No modified or added paragraphs found to translate.'
-        : 'Nebyly nalezeny žádné změněné ani nově přidané odstavce k překladu.';
+        ? (isNewLang ? 'No paragraphs found to translate.' : 'No modified or added paragraphs found to translate.')
+        : (isNewLang ? 'Nebyly nalezeny žádné odstavce k překladu.' : 'Nebyly nalezeny žádné změněné ani nově přidané odstavce k překladu.');
     }
 
     const auxLangName = params.auxiliaryLangName || '';
 
     const t = lang === 'en'
       ? {
-        title: '=== BATCH TRANSLATION UPDATE ===',
+        title: isNewLang ? '=== BATCH TRANSLATION ===' : '=== BATCH TRANSLATION UPDATE ===',
         role: 'You are an experienced professional translator.',
-        task: 'TASK: Provide updated or new translations of the following ' + items.length + ' paragraphs in language: ' + targetLang + '.',
+        task: isNewLang
+          ? 'TASK: Provide translations of the following ' + items.length + ' paragraphs in language: ' + targetLang + '.'
+          : 'TASK: Provide updated or new translations of the following ' + items.length + ' paragraphs in language: ' + targetLang + '.',
         rulesTitle: '=== CRITICAL INSTRUCTIONS ===',
-        rules: [
-          '1. For EACH paragraph output its exact tag (e.g. [#12]) on its own line, followed immediately by the translated text.',
-          '2. For MODIFIED paragraphs make ONLY the minimal changes reflecting the reference difference; keep unchanged phrases identical to the current translation.',
-          '3. For ADDED paragraphs translate the new reference text faithfully.',
-          '4. Do NOT output any introduction, commentary or filler – only the tagged paragraphs.'
-        ],
+        rules: isNewLang
+          ? [
+            '1. For EACH paragraph output its exact tag (e.g. [#12]) on its own line, followed immediately by the translated text.',
+            '2. Translate faithfully, maintaining a natural style and professional terminology in ' + targetLang + '.',
+            '3. Do NOT output any introduction, commentary or filler – only the tagged paragraphs.'
+          ]
+          : [
+            '1. For EACH paragraph output its exact tag (e.g. [#12]) on its own line, followed immediately by the translated text.',
+            '2. For MODIFIED paragraphs make ONLY the minimal changes reflecting the reference difference; keep unchanged phrases identical to the current translation.',
+            '3. For ADDED paragraphs translate the new reference text faithfully.',
+            '4. Do NOT output any introduction, commentary or filler – only the tagged paragraphs.'
+          ],
         para: 'PARAGRAPH', added: 'NEWLY ADDED', modified: 'MODIFIED', typ: 'Type',
         newRef: 'NEW REFERENCE TEXT (' + refLang + '):', oldRef: 'OLD REFERENCE TEXT (' + refLang + '):',
         updRef: 'NEW REFERENCE TEXT:', approved: 'CURRENT APPROVED TRANSLATION (' + targetLang + '):',
         aux: 'AUXILIARY REFERENCE (' + auxLangName + '):'
       }
       : {
-        title: '=== HROMADNÁ AKTUALIZACE PŘEKLADU ===',
+        title: isNewLang ? '=== HROMADNÝ PŘEKLAD ===' : '=== HROMADNÁ AKTUALIZACE PŘEKLADU ===',
         role: 'Jste zkušený odborný překladatel.',
-        task: 'ÚKOL: Připravte aktualizované nebo nové překlady následujících ' + items.length + ' odstavců v jazyce: ' + targetLang + '.',
+        task: isNewLang
+          ? 'ÚKOL: Připravte překlady následujících ' + items.length + ' odstavců v jazyce: ' + targetLang + '.'
+          : 'ÚKOL: Připravte aktualizované nebo nové překlady následujících ' + items.length + ' odstavců v jazyce: ' + targetLang + '.',
         rulesTitle: '=== PŘÍSNÉ POKYNY PRO FORMÁT ODPOVĚDI ===',
-        rules: [
-          '1. U KAŽDÉHO odstavce uveďte na samostatném řádku jeho přesnou značku (např. [#12]) a pod ni přeložený text.',
-          '2. U odstavců typu UPRAVENO proveďte POUZE minimální změny odpovídající rozdílu v referenci; nezměněné formulace ponechte shodné s dosavadním překladem.',
-          '3. U odstavců typu PŘIDÁNO přeložte nový referenční text věrně.',
-          '4. Nevypisujte žádné úvody, komentáře ani zdvořilostní fráze – pouze označené odstavce.'
-        ],
+        rules: isNewLang
+          ? [
+            '1. U KAŽDÉHO odstavce uveďte na samostatném řádku jeho přesnou značku (např. [#12]) a pod ni přeložený text.',
+            '2. Přeložte text věrně a zachovejte přirozený styl a odbornou terminologii v jazyce ' + targetLang + '.',
+            '3. Nevypisujte žádné úvody, komentáře ani zdvořilostní fráze – pouze označené odstavce.'
+          ]
+          : [
+            '1. U KAŽDÉHO odstavce uveďte na samostatném řádku jeho přesnou značku (např. [#12]) a pod ni přeložený text.',
+            '2. U odstavců typu UPRAVENO proveďte POUZE minimální změny odpovídající rozdílu v referenci; nezměněné formulace ponechte shodné s dosavadním překladem.',
+            '3. U odstavců typu PŘIDÁNO přeložte nový referenční text věrně.',
+            '4. Nevypisujte žádné úvody, komentáře ani zdvořilostní fráze – pouze označené odstavce.'
+          ],
         para: 'ODSTAVEC', added: 'NOVĚ PŘIDÁNO', modified: 'UPRAVENO', typ: 'Typ',
         newRef: 'NOVÝ REFERENČNÍ TEXT (' + refLang + '):', oldRef: 'PŮVODNÍ REFERENČNÍ TEXT (' + refLang + '):',
         updRef: 'NOVÝ REFERENČNÍ TEXT:', approved: 'DOSAVADNÍ SCHVÁLENÝ PŘEKLAD (' + targetLang + '):',
@@ -1051,6 +1174,20 @@
 
     const body = items.map(function (it, idx) {
       const idTag = it.rowId || ('#' + (idx + 1));
+      if (isNewLang) {
+        const lines = [
+          '----------------------------------------',
+          t.para + ': [' + idTag + ']',
+          t.newRef,
+          cleanText(it.refNew)
+        ];
+        if (auxLangName && it.auxText && cleanText(it.auxText)) {
+          lines.push(t.aux, cleanText(it.auxText));
+        }
+        lines.push('');
+        return lines.join('\n');
+      }
+
       if (it.classification === 'ADDED') {
         const lines = [
           '----------------------------------------',
@@ -1413,6 +1550,7 @@
     defaultLanguageLabel: defaultLanguageLabel,
     getLanguageInfo: getLanguageInfo,
     getLanguageLabel: getLanguageLabel,
+    isNewLanguage: isNewLanguage,
     generateTargetStub: generateTargetStub,
     rehydrateStubs: rehydrateStubs,
     resolveStubs: resolveStubs,

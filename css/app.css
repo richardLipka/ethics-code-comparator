@@ -888,6 +888,21 @@ html, body {
   align-items: stretch;
 }
 
+/* 1 Target Column Layout for Newly Added Languages (Reference + Target Editor) */
+.article-grid.layout-new-lang {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(360px, 1.25fr);
+  gap: 1rem;
+  align-items: stretch;
+}
+
+.article-grid.layout-new-lang.has-aux {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) minmax(320px, 1.25fr);
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
 .diff-box.aux-diff-box {
   background-color: var(--bg-tertiary);
   color: var(--text-primary);
@@ -910,6 +925,13 @@ html, body {
 @media (max-width: 1200px) {
   .article-grid.layout-4cols {
     grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .article-grid.layout-new-lang,
+  .article-grid.layout-new-lang.has-aux {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -21,8 +21,10 @@ tests. Each adapter file registers itself when it is loaded; load it after `js/i
 
 ## Import adapters
 
-Registry: `js/io/importers.js` (global `Importers`). Default: `js/io/excel-importer.js`
-(`.xlsx`, `.xlsm`, `.xls`, `.ods`, `.csv`, via SheetJS).
+Registry: `js/io/importers.js` (global `Importers`). Built-in importers:
+- `js/io/excel-importer.js` (`.xlsx`, `.xlsm`, `.xls`, `.ods`, `.csv`, via SheetJS)
+- `js/io/word-importer.js` (`.docx`, `.doc`)
+- `js/io/text-importer.js` (`.txt`)
 
 ```js
 Importers.register({

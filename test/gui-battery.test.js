@@ -201,6 +201,47 @@ function workbookFile(window, sheets, name) {
   return new window.File([buf], name || 'data.xlsx');
 }
 
+function createTestDocx(paragraphs) {
+  const zlib = require('zlib');
+  const bodyXml = paragraphs.map(p => '<w:p><w:r><w:t>' + p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</w:t></w:r></w:p>').join('');
+  const docXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + bodyXml + '</w:body></w:document>';
+  const nameBuf = Buffer.from('word/document.xml', 'utf8');
+  const compData = zlib.deflateRawSync(Buffer.from(docXml, 'utf8'));
+
+  const lh = Buffer.alloc(30 + nameBuf.length + compData.length);
+  lh.writeUInt32LE(0x04034b50, 0);
+  lh.writeUInt16LE(20, 4);
+  lh.writeUInt16LE(0, 6);
+  lh.writeUInt16LE(8, 8);
+  lh.writeUInt32LE(compData.length, 18);
+  lh.writeUInt32LE(Buffer.byteLength(docXml), 22);
+  lh.writeUInt16LE(nameBuf.length, 26);
+  lh.writeUInt16LE(0, 28);
+  nameBuf.copy(lh, 30);
+  compData.copy(lh, 30 + nameBuf.length);
+
+  const cd = Buffer.alloc(46 + nameBuf.length);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt16LE(20, 4);
+  cd.writeUInt16LE(20, 6);
+  cd.writeUInt16LE(0, 8);
+  cd.writeUInt16LE(8, 10);
+  cd.writeUInt32LE(compData.length, 20);
+  cd.writeUInt32LE(Buffer.byteLength(docXml), 24);
+  cd.writeUInt16LE(nameBuf.length, 28);
+  cd.writeUInt32LE(0, 42);
+  nameBuf.copy(cd, 46);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(cd.length, 12);
+  eocd.writeUInt32LE(lh.length, 16);
+
+  return Buffer.concat([lh, cd, eocd]);
+}
+
 function setSelect(window, select, value) {
   select.value = value;
   if (select.onchange) select.onchange();
@@ -1297,6 +1338,247 @@ runTest('Ověření překladu: tlačítko zkopíruje prompt pro kontrolu věrnos
   assert.ok(promptEn.includes('Verify the semantic equivalence'), 'Anglický prompt obsahuje úkol ověření');
   assert.ok(promptEn.includes('=== 2. NEW TRANSLATION UNDER REVIEW'), 'Anglický prompt obsahuje sekci nového překladu');
   assert.ok(promptEn.includes('DISCREPANCIES & DEFECTS'), 'Anglický prompt obsahuje sekci nedostatků');
+});
+
+runTest('Nově přidaný jazyk (bez původního sloupce): přidání v Kroku 1, 1-sloupcový layout ve studiu, prostý překlad a export', async () => {
+  const { window, document } = createDomEnvironment();
+  document.getElementById('loadSampleBtn').click();
+  await sleep(100);
+
+  const nameInput = document.getElementById('newLangNameInput');
+  const colNameInput = document.getElementById('newLangColNameInput');
+  const addBtn = document.getElementById('addNewLangBtn');
+  assert.ok(nameInput && addBtn, 'Ovládací prvky pro přidání jazyka existují v Kroku 1');
+
+  nameInput.value = 'Polština';
+  colNameInput.value = 'PL';
+  addBtn.click();
+  await sleep(50);
+
+  const rowNew = document.querySelector('tr.lang-row-new');
+  assert.ok(rowNew, 'Řádek pro nově přidaný jazyk je vykreslen v tabulce');
+  assert.ok(rowNew.textContent.includes('Polština'));
+  assert.ok(rowNew.querySelector('.badge-info').textContent.includes('nový jazyk'));
+  assert.ok(rowNew.querySelector('.remove-lang-btn'), 'Obsahuje tlačítko pro odebrání');
+
+  document.getElementById('confirmMappingBtn').click();
+  document.getElementById('goToTranslationBtn').click();
+  await sleep(50);
+
+  const tabs = Array.from(document.querySelectorAll('#langTabsWrapper .lang-tab'));
+  const newTab = tabs.find(t => t.textContent.includes('Polština'));
+  assert.ok(newTab, 'Záložka nového jazyka existuje');
+  newTab.click();
+  await sleep(50);
+
+  const card0 = document.getElementById('article-card-0');
+  assert.ok(card0, 'Karta odstavce existuje');
+  const grid = card0.querySelector('.article-grid');
+  assert.ok(grid.classList.contains('layout-new-lang'), 'Mřížka používá layout-new-lang');
+  assert.strictEqual(card0.querySelector('.cardTargetOldTitle'), null, 'Stará verze chybí');
+  assert.strictEqual(card0.querySelector('.live-target-diff'), null, 'Rozdílový panel chybí');
+  const textarea = card0.querySelector('textarea.target-textarea');
+  assert.ok(textarea, 'Editor je přítomen');
+
+  card0.querySelector('.copy-prompt-btn').click();
+  await sleep(20);
+  const copied = window.getLastCopiedText();
+  assert.ok(copied.includes('Přeložte text do jazyka: Polština'), 'Prompt je prostý překlad');
+  assert.ok(!copied.includes('STARÁ VERZE'), 'Neobsahuje staré znění reference');
+  assert.ok(!copied.includes('SCHVÁLENÝ PŘEKLAD'), 'Neobsahuje původní schválený překlad');
+
+  // Hromadné schválení neoznačí prázdné nepřeložené řádky u nového jazyka
+  document.getElementById('approveUnchangedBtn').click();
+  await sleep(20);
+  let card0After = document.getElementById('article-card-0');
+  assert.strictEqual(card0After.classList.contains('status-verified'), false, 'Nepřeložený odstavec nového jazyka se neoznačí jako schválený');
+
+  const curTextarea = card0After.querySelector('textarea.target-textarea');
+  typeInto(window, curTextarea, 'Przetłumaczony tekst.');
+  const cb = card0After.querySelector('.verify-checkbox');
+  cb.checked = true;
+  cb.dispatchEvent(new window.Event('change'));
+  await sleep(20);
+  assert.ok(card0After.classList.contains('status-verified'), 'Po ručním schválení je hotovo');
+
+  document.getElementById('goToExportBtn').click();
+  await sleep(50);
+  const compFile = window.__app.exportTables('comprehensive');
+  assert.ok(compFile, 'Kompletní export úspěšně proběhl');
+  const cleanFile = window.__app.exportTables('clean');
+  assert.ok(cleanFile, 'Export nové verze úspěšně proběhl');
+
+  const jsonStr = window.StorageManager.serializeProjectJson(window.__app.state);
+  const parsed = window.StorageManager.parseProjectJson(jsonStr);
+  assert.ok(Object.keys(parsed.mappings.languages).some(k => parsed.mappings.languages[k].isNewLanguage && parsed.mappings.languages[k].label === 'Polština'));
+});
+
+runTest('Nahrání textového souboru (.txt): rozdělení na odstavce jako referenční sloupec, přidání jazyka a export', async () => {
+  const { window, document } = createDomEnvironment();
+  const txtContent = 'První odstavec textu k překladu.\n\nDruhý odstavec obsahující další informace.\n\nTřetí odstavec dokumentu.';
+  const file = new window.File([txtContent], 'predpis.txt');
+
+  window.__app.processUploadedFile(file);
+  await sleep(100);
+
+  const st = window.__app.state;
+  assert.deepStrictEqual(plain(st.headers), ['Reference']);
+  assert.strictEqual(st.rows.length, 3);
+  assert.strictEqual(st.rows[0]['Reference'], 'První odstavec textu k překladu.');
+  assert.strictEqual(st.rows[1]['Reference'], 'Druhý odstavec obsahující další informace.');
+  assert.strictEqual(st.rows[2]['Reference'], 'Třetí odstavec dokumentu.');
+
+  // Možnosti listů i záhlaví jsou pro text skryty
+  assert.strictEqual(document.getElementById('sheetOptionsWrapper').style.display, 'none');
+
+  // Výběr referenčních sloupců: refNewCol = Reference, refOldCol = ''
+  assert.strictEqual(document.getElementById('refNewSelect').value, 'Reference');
+  assert.strictEqual(document.getElementById('refOldSelect').value, '');
+  assert.strictEqual(document.getElementById('refOldSelect').options[0].textContent, '— žádná (pouze nová reference) —');
+
+  // Bez cílového jazyka nelze pokračovat
+  document.getElementById('confirmMappingBtn').click();
+  await sleep(20);
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'none');
+
+  // Přidání cílového jazyka
+  document.getElementById('newLangNameInput').value = 'Polština';
+  document.getElementById('newLangColNameInput').value = 'PL';
+  document.getElementById('addNewLangBtn').click();
+  await sleep(50);
+
+  // Potvrzení mapování a přechod do Kroku 2
+  document.getElementById('confirmMappingBtn').click();
+  await sleep(20);
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'block');
+
+  // Přechod do překladového studia
+  document.getElementById('goToTranslationBtn').click();
+  await sleep(50);
+
+  const card0 = document.getElementById('article-card-0');
+  assert.ok(card0, 'Karta prvního odstavce existuje');
+  assert.strictEqual(card0.querySelector('.diff-box').textContent.trim(), 'První odstavec textu k překladu.');
+  assert.strictEqual(card0.querySelector('.cardTargetOldTitle'), null, 'Stará reference ani starý překlad se nezobrazují');
+
+  // Přeložení prvního odstavce
+  const textarea = card0.querySelector('textarea.target-textarea');
+  typeInto(window, textarea, 'Pierwszy akapit tekstu.');
+  const cb = card0.querySelector('.verify-checkbox');
+  cb.checked = true;
+  cb.dispatchEvent(new window.Event('change'));
+  await sleep(20);
+  assert.ok(card0.classList.contains('status-verified'));
+
+  // Krok 4: Export
+  document.getElementById('goToExportBtn').click();
+  await sleep(50);
+  const cleanFile = window.__app.exportTables('clean');
+  assert.ok(cleanFile, 'Export nové verze proběhl');
+  const wbClean = (await lastWorkbook(window)).wb;
+  const sheetClean = wbClean.Sheets[wbClean.SheetNames[0]];
+  const cleanHeaders = window.XLSX.utils.sheet_to_json(sheetClean, { header: 1 })[0];
+  assert.deepStrictEqual(plain(cleanHeaders), ['Reference', 'PL']);
+  const cleanRows = window.XLSX.utils.sheet_to_json(sheetClean, { defval: '' });
+  assert.strictEqual(cleanRows[0]['PL'], 'Pierwszy akapit tekstu.');
+});
+
+runTest('Nahrání Word dokumentu (.docx a .doc): odstavce jako referenční buňky, čistý přehled změn a překlad', async () => {
+  const { window, document } = createDomEnvironment();
+
+  // Test .docx
+  const docxBuf = createTestDocx(['První odstavec z Wordu.', 'Druhý odstavec z Wordu.']);
+  const docxFile = new window.File([docxBuf], 'dokument.docx');
+
+  window.__app.processUploadedFile(docxFile);
+  await sleep(100);
+
+  let st = window.__app.state;
+  assert.deepStrictEqual(plain(st.headers), ['Reference']);
+  assert.strictEqual(st.rows.length, 2);
+  assert.strictEqual(st.rows[0]['Reference'], 'První odstavec z Wordu.');
+  assert.strictEqual(st.rows[1]['Reference'], 'Druhý odstavec z Wordu.');
+  assert.strictEqual(document.getElementById('sheetOptionsWrapper').style.display, 'none');
+
+  // Test .doc (HTML formát Wordu)
+  const htmlDoc = '<html xmlns:w="urn:schemas-microsoft-com:office:word"><body><p>HTML odstavec 1.</p><p>HTML odstavec 2.</p></body></html>';
+  const docFile = new window.File([htmlDoc], 'dokument.doc');
+  window.__app.processUploadedFile(docFile);
+  await sleep(100);
+
+  st = window.__app.state;
+  assert.strictEqual(st.rows.length, 2);
+  assert.strictEqual(st.rows[0]['Reference'], 'HTML odstavec 1.');
+  assert.strictEqual(st.rows[1]['Reference'], 'HTML odstavec 2.');
+
+  // Přidání jazyka a dokončení workflow
+  document.getElementById('newLangNameInput').value = 'Francouzština';
+  document.getElementById('newLangColNameInput').value = 'FR';
+  document.getElementById('addNewLangBtn').click();
+  await sleep(50);
+
+  document.getElementById('confirmMappingBtn').click();
+  assert.strictEqual(document.getElementById('step2Section').style.display, 'block');
+
+  // Krok 2 ověření přehledu reference (žádné <del> značky když refOldCol chybí)
+  const diffRows = document.querySelectorAll('#refDiffTableBody tr');
+  assert.strictEqual(diffRows.length, 2);
+  assert.ok(diffRows[0].textContent.includes('HTML odstavec 1.'));
+  assert.strictEqual(diffRows[0].querySelectorAll('del').length, 0);
+
+  document.getElementById('goToTranslationBtn').click();
+  await sleep(50);
+  const card0 = document.getElementById('article-card-0');
+  assert.ok(card0.querySelector('.article-grid').classList.contains('layout-new-lang'));
+});
+
+runTest('Nahrání Excelu s jediným sloupcem: automatická nová reference bez staré, přidání jazyka a export', async () => {
+  const { window, document } = createDomEnvironment();
+  const file = workbookFile(window, {
+    Data: [
+      ['Výchozí text'],
+      ['První odstavec předpisu.'],
+      ['Druhý odstavec předpisu.']
+    ]
+  }, 'jednosloupcovy.xlsx');
+
+  window.__app.processUploadedFile(file);
+  await sleep(100);
+
+  const st = window.__app.state;
+  assert.deepStrictEqual(plain(st.headers), ['Výchozí text']);
+  assert.strictEqual(st.rows.length, 2);
+  assert.strictEqual(document.getElementById('refNewSelect').value, 'Výchozí text');
+  assert.strictEqual(document.getElementById('refOldSelect').value, '');
+
+  // Pro Excel zůstávají možnosti listů a záhlaví dostupné
+  assert.strictEqual(document.getElementById('sheetOptionsWrapper').style.display, 'flex');
+
+  // Přidání cílového jazyka
+  document.getElementById('newLangNameInput').value = 'Italština';
+  document.getElementById('newLangColNameInput').value = 'IT';
+  document.getElementById('addNewLangBtn').click();
+  await sleep(50);
+
+  document.getElementById('confirmMappingBtn').click();
+  document.getElementById('goToTranslationBtn').click();
+  await sleep(50);
+
+  const card0 = document.getElementById('article-card-0');
+  typeInto(window, card0.querySelector('textarea.target-textarea'), 'Primo paragrafo.');
+  card0.querySelector('.verify-checkbox').click();
+  await sleep(20);
+
+  document.getElementById('goToExportBtn').click();
+  await sleep(50);
+  const compFile = window.__app.exportTables('comprehensive');
+  assert.ok(compFile, 'Export srovnání proběhl');
+  const wbComp = (await lastWorkbook(window)).wb;
+  const sheetComp = wbComp.Sheets[wbComp.SheetNames[0]];
+  const compHeaders = window.XLSX.utils.sheet_to_json(sheetComp, { header: 1 })[0];
+  assert.deepStrictEqual(plain(compHeaders), ['Výchozí text', 'IT']);
+  const compRows = window.XLSX.utils.sheet_to_json(sheetComp, { defval: '' });
+  assert.strictEqual(compRows[0]['IT'], 'Primo paragrafo.');
 });
 
 // Výsledky

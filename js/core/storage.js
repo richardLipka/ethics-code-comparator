@@ -287,15 +287,24 @@
     const savedLanguages = isPlainObject(m.languages) ? m.languages : {};
     mappings.targetCols.forEach(function (col) {
       const lang = isPlainObject(savedLanguages[col]) ? savedLanguages[col] : {};
-      mappings.languages[col] = {
+      const isNew = lang.isNewLanguage === true || (typeof col === 'string' && col.indexOf('__new__') === 0);
+      const entry = {
         label: typeof lang.label === 'string' ? lang.label : '',
         newCol: typeof lang.newCol === 'string' ? lang.newCol : '',
         newColName: typeof lang.newColName === 'string' ? lang.newColName : ''
       };
+      if (isNew) entry.isNewLanguage = true;
+      mappings.languages[col] = entry;
     });
     const languageNewCols = mappings.targetCols.map(function (col) { return mappings.languages[col].newCol; });
-    [mappings.refOldCol, mappings.refNewCol].concat(mappings.targetCols, languageNewCols).forEach(function (col) {
+    [mappings.refOldCol, mappings.refNewCol].concat(languageNewCols).forEach(function (col) {
       if (col && headers.indexOf(col) === -1) {
+        throw projectError('MISSING_COLUMN', 'selected column "' + col + '" does not exist in the table', { COL: col });
+      }
+    });
+    mappings.targetCols.forEach(function (col) {
+      const isNew = mappings.languages[col] && mappings.languages[col].isNewLanguage;
+      if (!isNew && headers.indexOf(col) === -1) {
         throw projectError('MISSING_COLUMN', 'selected column "' + col + '" does not exist in the table', { COL: col });
       }
     });

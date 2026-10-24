@@ -13,6 +13,8 @@ const SampleGenerator = require('../js/core/sample-generator');
 const I18n = require('../js/core/i18n');
 const Importers = require('../js/io/importers');
 const ExcelImporter = require('../js/io/excel-importer');
+const WordImporter = require('../js/io/word-importer');
+const TextImporter = require('../js/io/text-importer');
 const Exporters = require('../js/io/exporters');
 const ExcelExporter = require('../js/io/excel-exporter');
 const HtmlDocumentExporter = require('../js/io/html-document-exporter');
@@ -767,7 +769,328 @@ runTest('Modely dokumentu a shrnutí neobsahují formátování – vykreslí je
   assert.strictEqual(Exporters.get('html-file').export(model).extension, '.html');
 });
 
-// 12. Lokalizace a obecnost textů
+// 12. Podpora pro nově přidané jazyky bez staré verze
+runTest('Nový jazyk: isNewLanguage rozpozná __new__ id i příznak v konfiguraci', () => {
+  const mappings = {
+    languages: {
+      '__new__French': { label: 'Francouzština', isNewLanguage: true },
+      'Czech': { label: 'Čeština' }
+    }
+  };
+  assert.strictEqual(ComparatorEngine.isNewLanguage(mappings, '__new__French'), true);
+  assert.strictEqual(ComparatorEngine.isNewLanguage(mappings, 'Czech'), false);
+  assert.strictEqual(ComparatorEngine.isNewLanguage(mappings, '__new__custom'), true);
+});
+
+runTest('Nový jazyk: generateTargetStub inicializuje odstavce pro překlad bez staré verze', () => {
+  const g = genericTable();
+  const stubs = ComparatorEngine.generateTargetStub(
+    g.rows,
+    '__new__French',
+    g.mappings.refOldCol,
+    g.mappings.refNewCol,
+    '',
+    true
+  );
+  assert.strictEqual(stubs.length, 4);
+  assert.strictEqual(stubs[0].targetOld, '');
+  assert.strictEqual(stubs[0].classification, 'UNCHANGED');
+  assert.strictEqual(stubs[0].isVerified, false, 'U nového jazyka musí i nezměněná reference projít překladem');
+  assert.strictEqual(stubs[0].status, 'pending_translation');
+
+  assert.strictEqual(stubs[1].classification, 'MODIFIED');
+  assert.strictEqual(stubs[1].isVerified, false);
+  assert.strictEqual(stubs[1].status, 'pending_translation');
+
+  assert.strictEqual(stubs[2].classification, 'ADDED');
+  assert.strictEqual(stubs[2].isVerified, false);
+  assert.strictEqual(stubs[2].status, 'pending_translation');
+
+  assert.strictEqual(stubs[3].classification, 'REMOVED');
+  assert.strictEqual(stubs[3].isVerified, true, 'Zrušený odstavec se nepřekládá');
+});
+
+runTest('Nový jazyk: buildCopilotPrompt vytvoří prostý překlad bez diffu a historie změn', () => {
+  const promptCs = ComparatorEngine.buildCopilotPrompt({
+    promptLang: 'cs',
+    targetLangName: 'Francouzština',
+    refLangName: 'Reference',
+    rowId: '#2',
+    classification: 'MODIFIED',
+    refOld: 'Limit is 35 EUR.',
+    refNew: 'Limit is 50 EUR.',
+    targetOld: '',
+    diffResult: ComparatorEngine.computeDiff('Limit is 35 EUR.', 'Limit is 50 EUR.'),
+    isNewLanguage: true
+  });
+  assert.ok(promptCs.includes('Přeložte text do jazyka: Francouzština'), 'Obsahuje instrukci k překladu');
+  assert.ok(promptCs.includes('Limit is 50 EUR.'), 'Obsahuje nový referenční text');
+  assert.ok(!promptCs.includes('STARÉ ZNĚNÍ'), 'Neobsahuje staré referenční znění');
+  assert.ok(!promptCs.includes('PŮVODNÍ SCHVÁLENÝ'), 'Neobsahuje původní překlad');
+  assert.ok(!promptCs.includes('PŘEHLED ZMĚN'), 'Neobsahuje přehled změn');
+
+  const promptEn = ComparatorEngine.buildCopilotPrompt({
+    promptLang: 'en',
+    targetLangName: 'French',
+    refLangName: 'Reference',
+    rowId: '#2',
+    classification: 'MODIFIED',
+    refOld: 'Limit is 35 EUR.',
+    refNew: 'Limit is 50 EUR.',
+    targetOld: '',
+    diffResult: ComparatorEngine.computeDiff('Limit is 35 EUR.', 'Limit is 50 EUR.'),
+    isNewLanguage: true
+  });
+  assert.ok(promptEn.includes('Translate the text into language: French'));
+  assert.ok(promptEn.includes('Limit is 50 EUR.'));
+  assert.ok(!promptEn.includes('OLD REFERENCE TEXT'));
+});
+
+runTest('Nový jazyk: export kompletní i nová verze s kombinací aktualizovaných a nových jazyků', () => {
+  const g = genericTable();
+  const newLangId = '__new__French';
+  const mappings = {
+    refOldCol: g.mappings.refOldCol,
+    refNewCol: g.mappings.refNewCol,
+    targetCols: ['Czech', newLangId],
+    languages: {
+      Czech: g.mappings.languages.Czech,
+      [newLangId]: { label: 'Francouzština', newCol: '', newColName: 'French', isNewLanguage: true }
+    }
+  };
+  const translations = {
+    Czech: [
+      { targetNew: 'Stejný text.', isVerified: true, classification: 'UNCHANGED' },
+      { targetNew: 'Limit je 50 EUR.', isVerified: true, classification: 'MODIFIED' },
+      { targetNew: 'Zbrusu nový.', isVerified: true, classification: 'ADDED' },
+      { targetNew: '', isVerified: true, classification: 'REMOVED' }
+    ],
+    [newLangId]: [
+      { targetNew: 'Même texte.', isVerified: true, classification: 'UNCHANGED' },
+      { targetNew: 'La limite est de 50 EUR.', isVerified: true, classification: 'MODIFIED' },
+      { targetNew: 'Tout nouveau paragraphe.', isVerified: true, classification: 'ADDED' },
+      { targetNew: '', isVerified: true, classification: 'REMOVED' }
+    ]
+  };
+
+  // 1. Kompletní export: Czech má starou + novou verzi, Francouzština má jen 1 sloupec přidaný na konec
+  const comp = ComparatorEngine.prepareExportData({
+    rows: g.rows,
+    headers: g.headers,
+    mappings: mappings,
+    translations: translations,
+    exportType: 'comprehensive'
+  });
+  assert.ok(comp.headers.includes('French'), 'Export obsahuje sloupec nového jazyka');
+  assert.strictEqual(comp.headers.filter(h => h === 'French').length, 1, 'Pouze jeden sloupec pro nový jazyk');
+  assert.strictEqual(comp.data[0]['French'], 'Même texte.');
+  assert.strictEqual(comp.data[1]['French'], 'La limite est de 50 EUR.');
+  assert.strictEqual(comp.data[2]['French'], 'Tout nouveau paragraphe.');
+  assert.strictEqual(comp.data[3]['French'], '');
+
+  // 2. Čistý export (jen nová verze - vynechá REMOVED a staré verze)
+  const clean = ComparatorEngine.prepareExportData({
+    rows: g.rows,
+    headers: g.headers,
+    mappings: mappings,
+    translations: translations,
+    exportType: 'clean'
+  });
+  assert.strictEqual(clean.data.length, 3, 'Vynechán 1 zrušený řádek');
+  assert.deepStrictEqual(clean.headers, ['Reference new', 'Polish', 'Notes', 'Czech new', 'French']);
+  assert.strictEqual(clean.data[0]['French'], 'Même texte.');
+  assert.strictEqual(clean.data[1]['French'], 'La limite est de 50 EUR.');
+
+  // 3. Částečný export pro nový jazyk (omits targetOld)
+  const partial = ComparatorEngine.prepareLanguageExportData({
+    rows: g.rows,
+    headers: g.headers,
+    mappings: mappings,
+    translations: translations,
+    targetCol: newLangId,
+    contextCols: [mappings.refNewCol]
+  });
+  assert.deepStrictEqual(partial.headers, ['Řádek', 'Reference new', 'French', 'Stav']);
+  assert.strictEqual(partial.data[0]['French'], 'Même texte.');
+});
+
+runTest('Nový jazyk: StorageManager uloží a načte projekt s novým jazykem bez MISSING_COLUMN', () => {
+  const g = genericTable();
+  const newLangId = '__new__French';
+  const state = {
+    fileName: 'test.xlsx',
+    rows: g.rows,
+    headers: g.headers,
+    mappings: {
+      refOldCol: g.mappings.refOldCol,
+      refNewCol: g.mappings.refNewCol,
+      targetCols: ['Czech', newLangId],
+      languages: {
+        Czech: g.mappings.languages.Czech,
+        [newLangId]: { label: 'Francouzština', newCol: '', newColName: 'French', isNewLanguage: true }
+      }
+    },
+    translations: {
+      Czech: [],
+      [newLangId]: []
+    }
+  };
+
+  const json = StorageManager.serializeProjectJson(state);
+  const parsed = StorageManager.parseProjectJson(json);
+  assert.ok(parsed.mappings.targetCols.includes(newLangId));
+  assert.strictEqual(parsed.mappings.languages[newLangId].isNewLanguage, true);
+  assert.strictEqual(parsed.mappings.languages[newLangId].label, 'Francouzština');
+  assert.strictEqual(parsed.mappings.languages[newLangId].newColName, 'French');
+});
+
+// Helper pro vytvoření minimálního .docx v paměti pro testy
+function createTestDocx(paragraphs) {
+  const zlib = require('zlib');
+  const bodyXml = paragraphs.map(p => '<w:p><w:r><w:t>' + p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</w:t></w:r></w:p>').join('');
+  const docXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' + bodyXml + '</w:body></w:document>';
+  const nameBuf = Buffer.from('word/document.xml', 'utf8');
+  const compData = zlib.deflateRawSync(Buffer.from(docXml, 'utf8'));
+
+  const lh = Buffer.alloc(30 + nameBuf.length + compData.length);
+  lh.writeUInt32LE(0x04034b50, 0);
+  lh.writeUInt16LE(20, 4);
+  lh.writeUInt16LE(0, 6);
+  lh.writeUInt16LE(8, 8);
+  lh.writeUInt32LE(compData.length, 18);
+  lh.writeUInt32LE(Buffer.byteLength(docXml), 22);
+  lh.writeUInt16LE(nameBuf.length, 26);
+  lh.writeUInt16LE(0, 28);
+  nameBuf.copy(lh, 30);
+  compData.copy(lh, 30 + nameBuf.length);
+
+  const cd = Buffer.alloc(46 + nameBuf.length);
+  cd.writeUInt32LE(0x02014b50, 0);
+  cd.writeUInt16LE(20, 4);
+  cd.writeUInt16LE(20, 6);
+  cd.writeUInt16LE(0, 8);
+  cd.writeUInt16LE(8, 10);
+  cd.writeUInt32LE(compData.length, 20);
+  cd.writeUInt32LE(Buffer.byteLength(docXml), 24);
+  cd.writeUInt16LE(nameBuf.length, 28);
+  cd.writeUInt32LE(0, 42);
+  nameBuf.copy(cd, 46);
+
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 8);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(cd.length, 12);
+  eocd.writeUInt32LE(lh.length, 16);
+
+  return Buffer.concat([lh, cd, eocd]);
+}
+
+runTest('WordImporter: načtení .docx vytvoří 1 referenční sloupec s odstavci', () => {
+  const buf = createTestDocx(['První odstavec textu.', 'Druhý odstavec s & speciálním znakem.']);
+  const source = WordImporter.parse(buf, { fileName: 'predpis.docx' });
+  assert.strictEqual(source.sheetNames.length, 1);
+  const table = Importers.readSheet(source, source.sheetNames[0]);
+  assert.deepStrictEqual(table.headers, ['Reference']);
+  assert.strictEqual(table.rows.length, 2);
+  assert.strictEqual(table.rows[0]['Reference'], 'První odstavec textu.');
+  assert.strictEqual(table.rows[1]['Reference'], 'Druhý odstavec s & speciálním znakem.');
+  assert.deepStrictEqual(table.rowNumbers, [1, 2]);
+});
+
+runTest('WordImporter: načtení .doc (HTML formát Wordu) extrahuje odstavce', () => {
+  const html = '<html xmlns:w="urn:schemas-microsoft-com:office:word"><body><p>Odstavec 1.</p><p>Odstavec 2.</p></body></html>';
+  const source = WordImporter.parse(Buffer.from(html, 'utf8'), { fileName: 'dokument.doc' });
+  const table = Importers.readSheet(source, source.sheetNames[0]);
+  assert.deepStrictEqual(table.headers, ['Reference']);
+  assert.strictEqual(table.rows.length, 2);
+  assert.strictEqual(table.rows[0]['Reference'], 'Odstavec 1.');
+  assert.strictEqual(table.rows[1]['Reference'], 'Odstavec 2.');
+});
+
+runTest('TextImporter: načtení .txt souboru odděleného prázdnými řádky i jednotlivými řádky', () => {
+  const txt1 = 'Blok 1 řádek 1.\nBlok 1 řádek 2.\n\nBlok 2.';
+  const s1 = TextImporter.parse(txt1, { fileName: 'text1.txt' });
+  const t1 = Importers.readSheet(s1, s1.sheetNames[0]);
+  assert.strictEqual(t1.rows.length, 2);
+  assert.strictEqual(t1.rows[0]['Reference'], 'Blok 1 řádek 1.\nBlok 1 řádek 2.');
+  assert.strictEqual(t1.rows[1]['Reference'], 'Blok 2.');
+
+  const txt2 = 'Řádek 1.\nŘádek 2.\nŘádek 3.';
+  const s2 = TextImporter.parse(txt2, { fileName: 'text2.txt' });
+  const t2 = Importers.readSheet(s2, s2.sheetNames[0]);
+  assert.strictEqual(t2.rows.length, 3);
+  assert.strictEqual(t2.rows[0]['Reference'], 'Řádek 1.');
+  assert.strictEqual(t2.rows[2]['Reference'], 'Řádek 3.');
+});
+
+runTest('Importers: registr obsahuje Excel, Word i Text a acceptAttribute zahrnuje všechny přípony', () => {
+  const exts = Importers.acceptAttribute().split(',');
+  ['.xlsx', '.csv', '.docx', '.doc', '.txt'].forEach(ext => {
+    assert.ok(exts.includes(ext), 'Přípona ' + ext + ' je v acceptAttribute');
+  });
+  assert.strictEqual(Importers.findForFile('test.docx').id, 'word');
+  assert.strictEqual(Importers.findForFile('test.doc').id, 'word');
+  assert.strictEqual(Importers.findForFile('test.txt').id, 'text');
+  assert.strictEqual(Importers.findForFile('test.xlsx').id, 'excel');
+});
+
+runTest('Export s jedinou referencí (refOldCol = ""): kompletní, čistý i částečný export', () => {
+  const rows = [
+    { Reference: 'First article.' },
+    { Reference: 'Second article.' }
+  ];
+  const newLang = '__new__Polstina';
+  const mappings = {
+    refOldCol: '',
+    refNewCol: 'Reference',
+    targetCols: [newLang],
+    languages: {
+      [newLang]: { label: 'Polština', newCol: '', newColName: 'PL', isNewLanguage: true }
+    }
+  };
+  const translations = {
+    [newLang]: [
+      { targetNew: 'Pierwszy artykuł.', isVerified: true, classification: 'ADDED' },
+      { targetNew: 'Drugi artykuł.', isVerified: true, classification: 'ADDED' }
+    ]
+  };
+
+  // Kompletní export
+  const comp = ComparatorEngine.prepareExportData({
+    rows: rows,
+    headers: ['Reference'],
+    mappings: mappings,
+    translations: translations,
+    exportType: 'comprehensive'
+  });
+  assert.deepStrictEqual(comp.headers, ['Reference', 'PL']);
+  assert.strictEqual(comp.data.length, 2);
+  assert.strictEqual(comp.data[0]['PL'], 'Pierwszy artykuł.');
+
+  // Čistý export
+  const clean = ComparatorEngine.prepareExportData({
+    rows: rows,
+    headers: ['Reference'],
+    mappings: mappings,
+    translations: translations,
+    exportType: 'clean'
+  });
+  assert.deepStrictEqual(clean.headers, ['Reference', 'PL']);
+  assert.strictEqual(clean.data.length, 2);
+
+  // Částečný export pro vybraný jazyk
+  const partial = ComparatorEngine.prepareLanguageExportData({
+    rows: rows,
+    headers: ['Reference'],
+    mappings: mappings,
+    translations: translations,
+    targetCol: newLang,
+    contextCols: ['Reference']
+  });
+  assert.deepStrictEqual(partial.headers, ['Řádek', 'Reference', 'PL', 'Stav']);
+  assert.strictEqual(partial.data[0]['PL'], 'Pierwszy artykuł.');
+});
 runTest('i18n: všechny klíče z app.js a index.html existují v CS i EN; texty jsou obecné', () => {
   const appSrc = fs.readFileSync(path.join(__dirname, '../js/app.js'), 'utf8');
   const html = fs.readFileSync(path.join(__dirname, '../index.html'), 'utf8');

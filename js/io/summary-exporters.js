@@ -65,7 +65,7 @@
     md.push('');
     if (model.documentName) md.push('**' + L.document + ':** ' + model.documentName + '  ');
     md.push('**' + L.language + ':** ' + languageText(model, L) + '  ');
-    md.push('**' + L.refCols + ':** ' + model.refOldCol + ' → ' + model.refNewCol + '  ');
+    md.push('**' + L.refCols + ':** ' + (model.refOldCol ? model.refOldCol + ' → ' : '') + model.refNewCol + '  ');
     md.push('**' + L.date + ':** ' + model.date);
     md.push('');
     md.push('## ' + L.kpiTitle);
@@ -191,7 +191,7 @@
   <p>
     ${model.documentName ? `<strong>${esc(L.document)}:</strong> ${esc(model.documentName)}<br>` : ''}
     <strong>${esc(L.language)}:</strong> ${esc(languageText(model, L))}<br>
-    <strong>${esc(L.refCols)}:</strong> ${esc(model.refOldCol)} &rarr; ${esc(model.refNewCol)}<br>
+    <strong>${esc(L.refCols)}:</strong> ${model.refOldCol ? esc(model.refOldCol) + ' &rarr; ' : ''}${esc(model.refNewCol)}<br>
     <strong>${esc(L.date)}:</strong> ${model.date}
   </p>
 

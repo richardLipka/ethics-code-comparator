@@ -56,6 +56,7 @@
       refNewLabel: '2. Reference – nová verze:',
       refNewHelp: 'Sloupec s novou verzí textu. Porovnáním se určí změněné, nové a zrušené odstavce.',
       selectColumnPlaceholder: '— vyberte sloupec —',
+      optNoOldReference: '— žádná (pouze nová reference) —',
       targetColsLabel: '3. Jazyky k aktualizaci:',
       targetColsHelp: 'Zaškrtněte sloupce se starou verzí jazyků, které chcete aktualizovat; ostatní sloupce se ignorují (v kompletním exportu zůstanou beze změny). Pokud tabulka už obsahuje sloupec pro novou verzi jazyka, vyberte ho – jinak se při exportu vytvoří nový.',
       thUse: 'Použít',
@@ -294,7 +295,21 @@
       noTargetLang: 'Žádný jazyk k zobrazení.',
       noArticlesMatch: 'Žádné odstavce neodpovídají filtru nebo hledání.',
       charsLabel: 'znaků',
-      newColSuffix: ' (nová verze)'
+      newColSuffix: ' (nová verze)',
+      addLanguageTitle: 'Přidat nový jazyk (není v původním souboru)',
+      addLanguageDesc: 'Pro jazyk vytvořený navíc bude k dispozici jeden sloupec a prompt pro Copilot bude prostý překlad bez historie změn.',
+      newLangNamePlaceholder: 'Název nového jazyka (např. Polština)',
+      newLangColNamePlaceholder: 'Název sloupce v exportu (volitelné)',
+      addNewLangBtn: '➕ Přidat jazyk',
+      badgeNewLanguage: 'nový jazyk',
+      noOldVersion: '(nově vytvářený – bez staré verze)',
+      removeLangTitle: 'Odebrat tento jazyk',
+      cardTargetNewSingleTitle: '2. Překlad – {LANG}',
+      toastLangAlreadyExists: 'Jazyk s tímto názvem již v projektu existuje.',
+      toastEnterLangName: 'Zadejte prosím název nového jazyka.',
+      toastNewLangAdded: 'Nový jazyk „{NAME}“ byl přidán.',
+      toastNewLangRemoved: 'Jazyk „{NAME}“ byl odebrán.',
+      batchPromptDescNew: 'Prompt obsahuje všechny odstavce k překladu do aktivního jazyka (prostý překlad nové verze reference). Zkopírujte jej do Copilota.'
     },
 
     en: {
@@ -337,6 +352,7 @@
       refNewLabel: '2. Reference – new version:',
       refNewHelp: 'Column with the new version of the text. Comparing both finds modified, new and removed paragraphs.',
       selectColumnPlaceholder: '— select a column —',
+      optNoOldReference: '— none (new reference only) —',
       targetColsLabel: '3. Languages to update:',
       targetColsHelp: 'Tick the columns holding the old version of the languages you want to update; other columns are ignored (they stay unchanged in the full export). If the table already has a column for the new version of a language, select it – otherwise a new one is created on export.',
       thUse: 'Use',
@@ -575,7 +591,21 @@
       noTargetLang: 'No language to display.',
       noArticlesMatch: 'No paragraphs match the current filter or search.',
       charsLabel: 'chars',
-      newColSuffix: ' (new)'
+      newColSuffix: ' (new)',
+      addLanguageTitle: 'Add a new language (not in original file)',
+      addLanguageDesc: 'For an added language, a single column will be available and the prompt will be a plain translation without change history.',
+      newLangNamePlaceholder: 'New language name (e.g. Polish)',
+      newLangColNamePlaceholder: 'Export column name (optional)',
+      addNewLangBtn: '➕ Add language',
+      badgeNewLanguage: 'new language',
+      noOldVersion: '(newly created – no old version)',
+      removeLangTitle: 'Remove this language',
+      cardTargetNewSingleTitle: '2. Translation – {LANG}',
+      toastLangAlreadyExists: 'A language with this name already exists in the project.',
+      toastEnterLangName: 'Please enter a name for the new language.',
+      toastNewLangAdded: 'New language "{NAME}" has been added.',
+      toastNewLangRemoved: 'Language "{NAME}" has been removed.',
+      batchPromptDescNew: 'The prompt contains all paragraphs to translate into the active language (plain translation of the new reference version). Copy it into Copilot.'
     }
   };
 
